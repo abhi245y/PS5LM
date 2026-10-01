@@ -6,7 +6,7 @@ What it took to build llama.cpp for the PS5, and why. Upstream is pinned at `b11
 
 The SDK compiles with clang's own PS5 target, `x86_64-sie-ps5`, which defines `__PROSPERO__`, `__SCE__` and `__FreeBSD__ 9`. Its CMake toolchain (`prospero-cmake`) presents the console as FreeBSD on x86_64. Programs link dynamically against stubs of Sony's libraries (`libSceLibcInternal`, `libkernel_web`, `libSceNet`, ...) and run as payloads under elfldr.
 
-ggml and libllama build for it as they are: no source changes so far.
+ggml and libllama build for it as they are. One source patch so far, for safety on the console rather than for building (below).
 
 ## Build fixes (all in `scripts/build-llama.sh`)
 
@@ -16,17 +16,16 @@ ggml and libllama build for it as they are: no source changes so far.
 
 Build options: AVX, AVX2, FMA, F16C and BMI2 on, AVX-512 off (Zen 2), no OpenMP (ggml's own thread pool), static libraries, no OpenSSL.
 
+## Source patches (`patches/`, applied by `scripts/build-llama.sh`)
+
+1. **`0001-ps5-safe-cpu-defaults.patch`.** A payload may only use 5 of the 16 logical CPUs, and system services share them. llama.cpp's defaults (one thread per physical core, busy-waiting at `--poll 50`) took all five and the console shut down. On `__PROSPERO__` the default thread count becomes the CPUs in the affinity mask (`scePthreadGetaffinity`) minus two, and polling defaults to 0. `-t` and `--poll` still override.
+
 ## Output
 
 `build/llama-ps5/bin/`: `llama-cli` (20 MB), `llama-server` (20 MB), `llama-bench` (13 MB), position independent FreeBSD ELFs that import from `libSceLibcInternal.sprx`, `libkernel_web.sprx` and `libSceNet.sprx`. The only weak import is `__cxa_thread_atexit_impl`, which libc++abi checks for before use.
 
 `llvm-readelf` warns that `PT_DYNAMIC` is larger than `.dynamic`: the SDK's linker script puts `.dynsym`, `.dynstr` and `.rela.dyn` in the same segment, and the SDK's own samples have the same layout.
 
-## Not verified yet
+## On the console
 
-None of this has run on a console. Things to watch in Phase 0 and 1:
-
-- whether `mmap` of a multi-GiB model file works in a payload, or llama.cpp needs `--no-mmap`
-- whether a single `posix_memalign` of 7 to 9 GiB succeeds
-- how many cores the payload process may use, and whether `std::thread::hardware_concurrency()` reports them
-- stdout buffering through elfldr's socket
+Runs: see [CONSOLE.md](CONSOLE.md). mmap of the model works; one block of 6 GiB is the ceiling; `std::thread::hardware_concurrency()` reports 16 while only 5 CPUs are allowed, hence the patch. Open: the `[SceLibc] A heap error is detected` message at exit.

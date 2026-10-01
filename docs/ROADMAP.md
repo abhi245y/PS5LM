@@ -27,8 +27,8 @@ Decoding is bound by memory bandwidth: tokens per second ≈ effective bandwidth
 - [x] macOS host toolchain: Homebrew `llvm@21` and `lld` (`scripts/env.sh`)
 - [x] `probes/memprobe` builds
 - [x] `scripts/host-relapse.sh` serves the exploit page from macOS or Linux; `scripts/console-setup.sh` sends ftpsrv, klogsrv and shsrv after it
-- [ ] Console jailbroken (Relapse, firmware 13.60 or lower), with elfldr (9021), ftpsrv (2121) and klogsrv (3232)
-- [ ] `scripts/send.sh probes/memprobe/memprobe.elf`: record the results in `docs/CONSOLE.md`
+- [x] Console jailbroken (Relapse, firmware 13.60 or lower), with ftpsrv (2121), shsrv (2323) and klogsrv (3232)
+- [x] memprobe and threadprobe on the console: results in [CONSOLE.md](CONSOLE.md)
   - direct, flexible and malloc ceilings for one payload process
   - the largest single allocation (llama.cpp's CPU backend puts all weights in one buffer)
   - read bandwidth with 1 to 8 threads, on malloc and on direct memory
@@ -41,7 +41,8 @@ Decoding is bound by memory bandwidth: tokens per second ≈ effective bandwidth
 
 - [x] ggml and libllama cross-compile with no source changes
 - [x] `llama-cli`, `llama-server` and `llama-bench` link ([PORTING.md](PORTING.md) lists the three build fixes)
-- [ ] Smoke test with a small model (Qwen3.5 0.8B or SmolLM2) through `scripts/run.sh llama-cli`
+- [x] Smoke test: Qwen3.5 0.8B generates text on the PS5 CPU, 14.2 tok/s on two threads
+- [x] Safe CPU defaults for the PS5 (`patches/0001`): threads = allowed CPUs minus two, no busy-waiting
 - [ ] `llama-server` on the console: chat from a laptop or phone with llama.cpp's built-in web UI (port 8081, since websrv takes 8080)
 - [ ] `llama-bench` numbers for the small model
 - [ ] **First light: Qwen3.8-27B generates text on the PS5.** UD-Q2_K_XL if Phase 0 says it fits, UD-IQ2_XXS if not. A video of it, posted with the repo.
@@ -104,7 +105,7 @@ The route: ggml's Vulkan backend on [Mihawk-99's PS5_Vulkan](https://github.com/
 
 | Risk | Plan B |
 |---|---|
-| A payload process gets far less than 7 GiB | Move to the native app shell (Phase 3's) sooner, where direct memory is larger; IQ1_M meanwhile |
+| A payload process gets far less than 7 GiB (**confirmed: about 6 GiB, shared with the system**) | Move to the native app shell (Phase 3's) sooner, where direct memory is available; smaller models meanwhile |
 | The CPU is too slow for a 27B | Still first light; Phase 3 is the fix |
 | ggml-vulkan needs a feature the driver lacks | Its feature switches (`GGML_VK_DISABLE_*`), or fix it in the driver with its author |
 | Someone else gets there first | Keep Phase 1 short and publish as soon as it talks |

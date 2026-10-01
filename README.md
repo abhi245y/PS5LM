@@ -4,7 +4,7 @@
 
 The first target is **Qwen 3.8** (27B, hybrid Gated DeltaNet attention), the newest open Qwen. No one has run it on a PS5 yet.
 
-> **Status:** `llama-cli`, `llama-server` and `llama-bench` cross-compile and link for the PS5 with no changes to llama.cpp's source. Nothing has run on a console yet: that is next. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status:** llama.cpp runs on a PS5. Qwen3.5 0.8B generates 14 tokens/s on two of the console's CPU cores (firmware 13.60, PS5 Slim). Next: the chat UI in the PS5's browser, then bigger models. See [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/CONSOLE.md](docs/CONSOLE.md).
 
 ## Why llama.cpp
 
@@ -16,7 +16,8 @@ Earlier PS5 LLM work hand-writes GPU kernels for one model at a time. PS5LM port
 |---|---|
 | `third_party/llama.cpp` | upstream llama.cpp, pinned as a submodule |
 | `ps5/compat` | the few libc functions the console lacks |
-| `probes/memprobe` | Phase 0: measures memory, bandwidth and compute on the console |
+| `patches/` | PS5 changes to llama.cpp's source, kept small |
+| `probes/` | `memprobe` and `threadprobe`: what a payload gets on the console |
 | `scripts/` | SDK setup, the llama.cpp cross build, sending payloads |
 | `docs/` | [roadmap](docs/ROADMAP.md), [models that fit](docs/MODELS.md), [porting notes](docs/PORTING.md), [research](docs/RESEARCH.md) |
 

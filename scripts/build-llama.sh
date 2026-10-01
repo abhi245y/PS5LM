@@ -11,12 +11,23 @@ source "$root/scripts/env.sh"
 
 src="$root/third_party/llama.cpp"
 out="$root/build/llama-ps5"
-targets=("${@:-llama-cli llama-server llama-bench}")
+targets=("${@:-llama-cli llama-server llama-bench llama-completion}")
 
 if [ ! -f "$src/CMakeLists.txt" ]; then
     echo "build-llama: run git submodule update --init first" >&2
     exit 1
 fi
+
+# The PS5 changes to llama.cpp live in patches/ and go onto the submodule's
+# working tree; a patch that is already applied is skipped.
+for p in "$root"/patches/*.patch; do
+    [ -e "$p" ] || continue
+    if git -C "$src" apply --reverse --check "$p" 2>/dev/null; then
+        continue
+    fi
+    git -C "$src" apply "$p"
+    echo "build-llama: applied $(basename "$p")"
+done
 
 # The PS5's CPU is a Zen 2: AVX2, FMA, F16C and BMI2, no AVX-512.
 # No OpenMP in the SDK, so ggml's own thread pool. Static everything: a payload

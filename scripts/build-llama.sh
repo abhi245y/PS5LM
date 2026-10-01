@@ -25,11 +25,23 @@ fi
 # console spawns processes with a working directory, so subprocess.h goes without.
 ps5_flags="-DSUBPROCESS_HAVE_CWD=0"
 # There is no libm: the math functions are in Sony's libc (libSceLibcInternal).
+
+# ps5/compat fills in the libc functions the console lacks. It goes at the very
+# end of every link line (CMAKE_*_STANDARD_LIBRARIES), after the objects that
+# need it.
+compat_dir="$out/ps5compat"
+mkdir -p "$compat_dir"
+"$PS5_PAYLOAD_SDK/bin/prospero-clang" -O2 -Wall -Wextra -Werror -c \
+    "$root/ps5/compat/compat.c" -o "$compat_dir/compat.o"
+rm -f "$compat_dir/libps5compat.a"
+"$PS5_PAYLOAD_SDK/bin/prospero-ar" rcs "$compat_dir/libps5compat.a" "$compat_dir/compat.o"
 "$PS5_PAYLOAD_SDK/bin/prospero-cmake" -S "$src" -B "$out" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_FLAGS="$ps5_flags" \
     -DCMAKE_CXX_FLAGS="$ps5_flags" \
     -DMATH_LIBRARY=SceLibcInternal \
+    -DCMAKE_C_STANDARD_LIBRARIES="$compat_dir/libps5compat.a" \
+    -DCMAKE_CXX_STANDARD_LIBRARIES="$compat_dir/libps5compat.a" \
     -DBUILD_SHARED_LIBS=OFF \
     -DGGML_NATIVE=OFF \
     -DGGML_BACKEND_DL=OFF \

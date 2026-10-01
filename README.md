@@ -4,7 +4,7 @@
 
 The first target is **Qwen 3.8** (27B, hybrid Gated DeltaNet attention), the newest open Qwen. No one has run it on a PS5 yet.
 
-> Status: early work, nothing runs on the console yet. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status:** `llama-cli`, `llama-server` and `llama-bench` cross-compile and link for the PS5 with no changes to llama.cpp's source. Nothing has run on a console yet: that is next. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Why llama.cpp
 
@@ -15,10 +15,10 @@ Earlier PS5 LLM work hand-writes GPU kernels for one model at a time. PS5LM port
 | Path | What |
 |---|---|
 | `third_party/llama.cpp` | upstream llama.cpp, pinned as a submodule |
-| `patches/` | the PS5 changes to llama.cpp, kept small |
+| `ps5/compat` | the few libc functions the console lacks |
 | `probes/memprobe` | Phase 0: measures memory, bandwidth and compute on the console |
 | `scripts/` | SDK setup, the llama.cpp cross build, sending payloads |
-| `docs/` | roadmap and research notes |
+| `docs/` | [roadmap](docs/ROADMAP.md), [porting notes](docs/PORTING.md), [research](docs/RESEARCH.md) |
 
 ## Building
 
@@ -36,7 +36,7 @@ scripts/setup-sdk.sh
 source scripts/env.sh
 
 make -C probes/memprobe          # Phase 0 probe
-scripts/build-llama.sh           # llama.cpp for the PS5 (work in progress)
+scripts/build-llama.sh           # llama-cli, llama-server, llama-bench for the PS5
 ```
 
 ## Running on the console
@@ -49,6 +49,14 @@ scripts/send.sh probes/memprobe/memprobe.elf
 ```
 
 The probe streams its results back and also writes them to `/data/PS5LM/memprobe.txt` on the console.
+
+With [ftpsrv](https://github.com/ps5-payload-dev/ftpsrv) running too (port 2121), `scripts/run.sh` uploads a llama.cpp tool and starts it with arguments:
+
+```sh
+# copy a model to /data/PS5LM/models first (FTP or USB)
+scripts/run.sh llama-cli -m /data/PS5LM/models/model.gguf -p "Hello from a PS5" -n 64
+scripts/run.sh llama-server -m /data/PS5LM/models/model.gguf --host 0.0.0.0 --port 8081
+```
 
 ## Credits
 

@@ -43,7 +43,7 @@ Decoding is bound by memory bandwidth: tokens per second ≈ effective bandwidth
 - [x] `llama-cli`, `llama-server` and `llama-bench` link ([PORTING.md](PORTING.md) lists the three build fixes)
 - [x] Smoke test: Qwen3.5 0.8B generates text on the PS5 CPU, 14.2 tok/s on two threads
 - [x] Safe CPU defaults for the PS5 (`patches/0001`): threads = allowed CPUs minus two, no busy-waiting
-- [ ] `llama-server` on the console: chat from a laptop or phone with llama.cpp's built-in web UI (port 8081, since websrv takes 8080)
+- [x] `llama-server` on the console with a chat page in the PS5's own browser (`scripts/ps5-chat.sh`, `ps5/webui`); phones and laptops use the same page on port 8081
 - [ ] `llama-bench` numbers for the small model
 - [ ] **First light: Qwen3.8-27B generates text on the PS5.** UD-Q2_K_XL if Phase 0 says it fits, UD-IQ2_XXS if not. A video of it, posted with the repo.
 

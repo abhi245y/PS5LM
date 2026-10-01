@@ -4,7 +4,7 @@
 
 The first target is **Qwen 3.8** (27B, hybrid Gated DeltaNet attention), the newest open Qwen. No one has run it on a PS5 yet.
 
-> **Status:** llama.cpp runs on a PS5. Qwen3.5 0.8B generates 14 tokens/s on two of the console's CPU cores (firmware 13.60, PS5 Slim). Next: the chat UI in the PS5's browser, then bigger models. See [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/CONSOLE.md](docs/CONSOLE.md).
+> **Status:** llama.cpp runs on a PS5. Qwen3.5 0.8B generates 14 tokens/s on two of the console's CPU cores (firmware 13.60, PS5 Slim). There is a chat page in the PS5's own browser (`scripts/ps5-chat.sh`). Next: bigger models. See [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/CONSOLE.md](docs/CONSOLE.md).
 
 ## Why llama.cpp
 

@@ -41,6 +41,15 @@ First run, Qwen3.5 0.8B Q4_K_M, `-t 2 --poll 0 -lm none`, 512 context:
 
 `llama-server` loads Granite 4.2 3B (2.1 GiB) with mmap, so mapping a model file works in a payload.
 
+Chat through `llama-server` and `ps5/webui` in the PS5's browser (browser open, `-c 4096 -np 1 -lm none`, 3 threads from the safe defaults):
+
+| Model | Prompt | Generation |
+|---|---|---|
+| Qwen3.5 0.8B Q4_K_M, thinking off | 67 tok/s | 13.1 tok/s |
+| Granite 4.2 3B Q4_K_M | 0.6 tok/s | 0.2 tok/s |
+
+Granite is 4 times bigger but 65 times slower: something in that architecture's CPU path, to look into. llama.cpp's own web UI renders blank in the PS5 browser; `ps5/webui` (plain ES5) works.
+
 At exit, Sony's libc prints `[SceLibc] A heap error is detected` (SceLibcInternalHeap) after all work is done. Not investigated yet.
 
 ## shsrv quirks

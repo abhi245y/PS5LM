@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PS5LM</title>
+<!--
+  The chat page llama-server serves on the PS5 (llama-server --path www).
+  llama.cpp's own web UI renders blank in the PS5 browser, so this page sticks
+  to plain ES5 and XMLHttpRequest, with no external files. Sized for a TV.
+  SPDX-License-Identifier: GPL-3.0-or-later
+-->
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #151923;
+    --text: #e8ebf2;
+    --muted: #8a93a6;
+    --accent: #3d7bfd;
+    --user: #1f2a44;
+    --border: #262c3a;
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; align-items: baseline; gap: 16px; padding: 18px 32px;
+    border-bottom: 1px solid var(--border); }
+  header h1 { margin: 0; font-size: 30px; letter-spacing: 0.5px; }
+  header span { color: var(--muted); font-size: 20px; }
+  #log { flex: 1; overflow-y: auto; padding: 24px 32px; }
+  .msg { max-width: 1100px; margin: 0 0 18px; padding: 16px 22px; border-radius: 14px;
+    font-size: 26px; line-height: 1.45; white-space: pre-wrap; word-wrap: break-word; }
+  .user { background: var(--user); margin-left: auto; }
+  .bot { background: var(--panel); border: 1px solid var(--border); }
+  .think { color: var(--muted); font-style: italic; font-size: 22px; }
+  .meta { color: var(--muted); font-size: 18px; margin-top: 8px; }
+  form { display: flex; gap: 14px; padding: 18px 32px 26px; border-top: 1px solid var(--border); }
+  #input { flex: 1; font-size: 26px; padding: 16px 18px; border-radius: 12px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--text); }
+  button { font-size: 24px; padding: 0 30px; border-radius: 12px; border: 0;
+    background: var(--accent); color: #fff; }
+  button.stop { background: #a83a3a; }
+</style>
+</head>
+<body>
+<header><h1>PS5LM</h1><span id="model">llama.cpp on PlayStation 5</span></header>
+<div id="log"></div>
+<form id="form">
+  <input id="input" type="text" autocomplete="off" placeholder="Type a message">
+  <button id="send" type="submit">Send</button>
+</form>
+<script>
+(function () {
+  var log = document.getElementById('log');
+  var form = document.getElementById('form');
+  var input = document.getElementById('input');
+  var send = document.getElementById('send');
+  var SYSTEM = 'You are a helpful assistant running on a PlayStation 5. ' +
+    'Answer in one to three short sentences, in the language the user writes in.';
+  var messages = [];
+  var xhr = null;
+
+  function bubble(cls, text) {
+    var div = document.createElement('div');
+    div.className = 'msg ' + cls;
+    div.textContent = text || '';
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+    return div;
+  }
+
+  function busy(on) {
+    send.textContent = on ? 'Stop' : 'Send';
+    send.className = on ? 'stop' : '';
+  }
+
+  // The model name, for the header.
+  var info = new XMLHttpRequest();
+  info.open('GET', '/v1/models');
+  info.onload = function () {
+    try {
+      var id = JSON.parse(info.responseText).data[0].id;
+      document.getElementById('model').textContent = id.split('/').pop() + ' on PlayStation 5';
+    } catch (e) {}
+  };
+  info.send();
+
+  function ask(text) {
+    messages.push({ role: 'user', content: text });
+    // Keep the request small: the console's context is 4096 tokens.
+    if (messages.length > 12) messages = messages.slice(messages.length - 12);
+    bubble('user', text);
+    var out = bubble('bot', '');
+    var think = null;
+    var answer = '';
+    var reasoning = '';
+    var seen = 0;
+    var pending = '';
+    var started = Date.now();
+
+    xhr = new XMLHttpRequest();
+    xhr.open('POST', '/v1/chat/completions');
+    xhr.setRequestHeader('Content-Type', 'application/json');
+
+    // Server-sent events arrive in pieces; parse whole "data:" lines as they come.
+    xhr.onprogress = function () {
+      pending += xhr.responseText.substring(seen);
+      seen = xhr.responseText.length;
+      var lines = pending.split('\n');
+      pending = lines.pop();
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i].replace(/^\s+|\s+$/g, '');
+        if (line.indexOf('data:') !== 0) continue;
+        var data = line.substring(5).replace(/^\s+/, '');
+        if (data === '[DONE]') continue;
+        var chunk;
+        try { chunk = JSON.parse(data); } catch (e) { continue; }
+        var delta = chunk.choices && chunk.choices[0] && chunk.choices[0].delta;
+        if (delta && delta.reasoning_content) {
+          if (!think) { think = document.createElement('div'); think.className = 'think'; out.appendChild(think); }
+          reasoning += delta.reasoning_content;
+          think.textContent = reasoning;
+        }
+        if (delta && delta.content) {
+          answer += delta.content;
+          if (!out.lastChild || out.lastChild.nodeType !== 3) out.appendChild(document.createTextNode(''));
+          out.lastChild.nodeValue = answer;
+        }
+        if (chunk.timings) {
+          var meta = document.createElement('div');
+          meta.className = 'meta';
+          meta.textContent = chunk.timings.predicted_n + ' tokens, ' +
+            chunk.timings.predicted_per_second.toFixed(1) + ' tok/s, ' +
+            ((Date.now() - started) / 1000).toFixed(1) + ' s';
+          out.appendChild(meta);
+        }
+        log.scrollTop = log.scrollHeight;
+      }
+    };
+
+    xhr.onloadend = function () {
+      xhr.onprogress();
+      if (xhr.status && xhr.status !== 200 && !answer) out.textContent = 'Error ' + xhr.status + ': ' + xhr.responseText;
+      if (answer) messages.push({ role: 'assistant', content: answer });
+      xhr = null;
+      busy(false);
+      input.focus();
+    };
+
+    // Small models on four CPU cores: short answers, no thinking phase.
+    xhr.send(JSON.stringify({
+      messages: [{ role: 'system', content: SYSTEM }].concat(messages),
+      stream: true,
+      max_tokens: 256,
+      chat_template_kwargs: { enable_thinking: false }
+    }));
+    busy(true);
+  }
+
+  form.onsubmit = function (e) {
+    e.preventDefault();
+    if (xhr) { xhr.abort(); return; }
+    var text = input.value.replace(/^\s+|\s+$/g, '');
+    if (!text) return;
+    input.value = '';
+    ask(text);
+  };
+
+  bubble('bot', 'Hi! I am a language model running on this PlayStation 5, on its own CPU. Ask me anything.');
+  input.focus();
+})();
+</script>
+</body>
+</html>

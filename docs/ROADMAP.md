@@ -26,6 +26,7 @@ Decoding is bound by memory bandwidth: tokens per second ≈ effective bandwidth
 - [x] ps5-payload-dev SDK v0.43, pinned by checksum (`scripts/setup-sdk.sh`)
 - [x] macOS host toolchain: Homebrew `llvm@21` and `lld` (`scripts/env.sh`)
 - [x] `probes/memprobe` builds
+- [x] `scripts/host-relapse.sh` serves the exploit page from macOS or Linux; `scripts/console-setup.sh` sends ftpsrv, klogsrv and shsrv after it
 - [ ] Console jailbroken (Relapse, firmware 13.60 or lower), with elfldr (9021), ftpsrv (2121) and klogsrv (3232)
 - [ ] `scripts/send.sh probes/memprobe/memprobe.elf`: record the results in `docs/CONSOLE.md`
   - direct, flexible and malloc ceilings for one payload process
@@ -48,6 +49,18 @@ Decoding is bound by memory bandwidth: tokens per second ≈ effective bandwidth
 Expect 1 to 3 tok/s here. Slow, but it is Qwen 3.8 running on a PS5, and the claim we want first.
 
 **Done when** Qwen 3.8 answers a prompt on the console.
+
+## Phase 1.5: the launcher and the model library
+
+An Ollama-like way to get models and chat, without a PC in the loop. One payload, `ps5lm.elf`, kept in the loader's autoload:
+
+- [ ] A small web server (port 8090) with the **model library** page, opened in the PS5's own browser on start (`sceSystemServiceLaunchWebBrowser`, as the SDK's `browser` sample and PS5SX2 do). The same page works from a phone or laptop on the network.
+- [ ] The library: the curated list in [MODELS.md](MODELS.md) as `models.json`, each marked fits / tight / too big from the memprobe numbers, plus whatever is already in `/data/PS5LM/models` or on a USB drive.
+- [ ] **Download** from Hugging Face straight to `/data/PS5LM/models`, with progress and resume. HTTPS through OpenSSL from ps5-payload-dev's pacbrew repository, or Sony's own `libSceHttp2` and `libSceSsl`. The same TLS turns on llama.cpp's `-hf` downloads.
+- [ ] **Run**: start `llama-server` with the chosen model through the local elfldr (`127.0.0.1:9021`), stopping the one before. llama-server's own router mode spawns child processes, which a payload cannot do, so the launcher does the routing.
+- [ ] **Chat** in llama-server's built-in web UI, on the TV through the PS5 browser or from any device on the network, and the OpenAI-compatible API for other apps. If the PS5's WebKit is too old for that UI, the launcher serves a plain chat page instead.
+
+**Done when** a model can be picked, downloaded and chatted with using only the DualSense.
 
 ## Phase 2: fit and speed on the CPU
 

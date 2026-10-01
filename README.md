@@ -18,7 +18,7 @@ Earlier PS5 LLM work hand-writes GPU kernels for one model at a time. PS5LM port
 | `ps5/compat` | the few libc functions the console lacks |
 | `probes/memprobe` | Phase 0: measures memory, bandwidth and compute on the console |
 | `scripts/` | SDK setup, the llama.cpp cross build, sending payloads |
-| `docs/` | [roadmap](docs/ROADMAP.md), [porting notes](docs/PORTING.md), [research](docs/RESEARCH.md) |
+| `docs/` | [roadmap](docs/ROADMAP.md), [models that fit](docs/MODELS.md), [porting notes](docs/PORTING.md), [research](docs/RESEARCH.md) |
 
 ## Building
 
@@ -44,7 +44,9 @@ scripts/build-llama.sh           # llama-cli, llama-server, llama-bench for the 
 You need a PS5 you own on firmware 7.00 to 13.60, jailbroken, with an ELF loader listening on port 9021 ([elfldr](https://github.com/ps5-payload-dev/elfldr)).
 
 ```sh
+scripts/host-relapse.sh          # serves the Relapse exploit page; open it in the PS5's browser
 export PS5_HOST=192.168.1.50     # your console
+scripts/console-setup.sh         # FTP, kernel log and shell payloads
 scripts/send.sh probes/memprobe/memprobe.elf
 ```
 

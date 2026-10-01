@@ -1,0 +1,63 @@
+# PS5LM
+
+**llama.cpp on a jailbroken PlayStation 5.** Run any GGUF language model on the console itself, first on its Zen 2 CPU, then on its GPU.
+
+The first target is **Qwen 3.8** (27B, hybrid Gated DeltaNet attention), the newest open Qwen. No one has run it on a PS5 yet.
+
+> Status: early work, nothing runs on the console yet. See [docs/ROADMAP.md](docs/ROADMAP.md).
+
+## Why llama.cpp
+
+Earlier PS5 LLM work hand-writes GPU kernels for one model at a time. PS5LM ports llama.cpp itself, so every architecture and every quantization llama.cpp supports comes along: Qwen, Llama, Mistral, Gemma, from 1-bit to 8-bit. Qwen 3.8's smallest open model is 27B, and only the 2 to 3 bit quants fit in the console's memory, which llama.cpp already has.
+
+## Layout
+
+| Path | What |
+|---|---|
+| `third_party/llama.cpp` | upstream llama.cpp, pinned as a submodule |
+| `patches/` | the PS5 changes to llama.cpp, kept small |
+| `probes/memprobe` | Phase 0: measures memory, bandwidth and compute on the console |
+| `scripts/` | SDK setup, the llama.cpp cross build, sending payloads |
+| `docs/` | roadmap and research notes |
+
+## Building
+
+Needs the [ps5-payload-dev SDK](https://github.com/ps5-payload-dev/sdk) and a host LLVM.
+
+```sh
+# macOS
+brew install llvm@21 lld socat cmake ninja
+# Debian / Ubuntu
+sudo apt install clang-18 lld-18 socat cmake ninja-build
+
+git clone --recursive https://github.com/cobanov/PS5LM
+cd PS5LM
+scripts/setup-sdk.sh
+source scripts/env.sh
+
+make -C probes/memprobe          # Phase 0 probe
+scripts/build-llama.sh           # llama.cpp for the PS5 (work in progress)
+```
+
+## Running on the console
+
+You need a PS5 you own on firmware 7.00 to 13.60, jailbroken, with an ELF loader listening on port 9021 ([elfldr](https://github.com/ps5-payload-dev/elfldr)).
+
+```sh
+export PS5_HOST=192.168.1.50     # your console
+scripts/send.sh probes/memprobe/memprobe.elf
+```
+
+The probe streams its results back and also writes them to `/data/PS5LM/memprobe.txt` on the console.
+
+## Credits
+
+- [llama.cpp / ggml](https://github.com/ggml-org/llama.cpp), which does the actual work.
+- [ps5-payload-dev](https://github.com/ps5-payload-dev) (John Törnblom) for the SDK and the ELF loader.
+- [PS5SX2](https://github.com/Swordpdf/PS5SX2), [ProsperoAI](https://github.com/blackbearreloaded/ProsperoAI) and [PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan), whose notes on the console's memory and GPU this project leans on.
+
+## Licence
+
+GPL-3.0-or-later, see [LICENSE](LICENSE). llama.cpp keeps its MIT licence. No Sony SDK files, keys, firmware or model weights are in this repository.
+
+PS5LM is not affiliated with Sony Interactive Entertainment or Alibaba. "PlayStation" and "PS5" are trademarks of Sony Interactive Entertainment.

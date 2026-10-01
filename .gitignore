@@ -1,0 +1,14 @@
+# toolchains and downloads
+.deps/
+
+# build outputs
+build/
+*.elf
+*.o
+*.a
+
+# models never go in git
+*.gguf
+models/
+
+.DS_Store

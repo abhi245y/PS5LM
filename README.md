@@ -2,11 +2,9 @@
 
 **llama.cpp on a jailbroken PlayStation 5.** Run any GGUF language model on the console itself, first on its Zen 2 CPU, then on its GPU.
 
-<p align="center">
-  <a href="https://ps5lm.cobanov.dev"><img src="docs/media/ps5lm-demo.gif" width="640" alt="Qwen3.5 0.8B answering in the PS5's browser, typed with a DualSense"></a>
-</p>
+https://github.com/user-attachments/assets/8ce02fa3-c725-45e4-a753-c9dc9214d7c6
 
-<p align="center"><b><a href="https://ps5lm.cobanov.dev">ps5lm.cobanov.dev</a></b>: the full demo video and how it works</p>
+<p align="center"><b><a href="https://ps5lm.cobanov.dev">ps5lm.cobanov.dev</a></b>: how it works, numbers and roadmap</p>
 
 The first target is **Qwen 3.8** (27B, hybrid Gated DeltaNet attention), the newest open Qwen. No one has run it on a PS5 yet.
 

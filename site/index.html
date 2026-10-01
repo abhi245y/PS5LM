@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PS5LM: llama.cpp on a PlayStation 5</title>
+<meta name="description" content="PS5LM ports llama.cpp to the PlayStation 5. Open language models run on the console's own CPU, and you chat with them in the PS5's browser.">
+<meta name="theme-color" content="#0e0e14">
+<link rel="canonical" href="https://ps5lm.cobanov.dev/">
+<link rel="preload" as="font" type="font/woff2" href="/assets/fonts/recursive-sans-v1.woff2" crossorigin>
+<link rel="preload" as="font" type="font/woff2" href="/assets/fonts/recursive-mono-v1.woff2" crossorigin>
+<link rel="stylesheet" href="/assets/style.css?v=1">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://ps5lm.cobanov.dev/">
+<meta property="og:title" content="PS5LM: llama.cpp on a PlayStation 5">
+<meta property="og:description" content="Open language models running on the PS5's own CPU, with a chat page in the console's browser. Open source, GPL-3.0.">
+<meta property="og:image" content="https://ps5lm.cobanov.dev/media/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+</head>
+<body>
+<header class="site-header">
+  <div class="wrap nav">
+    <a class="brand" href="/">ps5lm</a>
+    <span class="nav-spacer"></span>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="#how">How it works</a>
+      <a href="#numbers">Numbers</a>
+      <a href="#roadmap">Roadmap</a>
+      <a href="#try">Try it</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <a class="btn" href="https://github.com/cobanov/PS5LM">GitHub</a>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <h1 class="display">llama.cpp, running on a PlayStation 5.</h1>
+        <p class="lede">PS5LM runs open language models on the console's own CPU. You chat with them in the PS5's browser, typing with the DualSense.</p>
+        <div class="cta">
+          <a class="btn btn-primary" href="https://github.com/cobanov/PS5LM">Source on GitHub</a>
+          <a class="btn" href="#how">How it works</a>
+        </div>
+        <p class="hero-note">Open source under GPL-3.0. Runs on a PS5 you own, on firmware 13.60 or lower.</p>
+      </div>
+      <figure class="demo">
+        <video id="demo" src="/media/ps5lm-demo.mp4" poster="/media/poster.jpg" muted loop playsinline preload="metadata"
+          aria-label="A PS5 on a TV: someone types with a DualSense in the PS5 browser, and Qwen3.5 answers, including a haiku about the PS5."></video>
+        <figcaption>Qwen3.5 0.8B on a PS5 Slim, answering at 21 tokens a second.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="wrap">
+      <h2>How it works</h2>
+      <p>Nothing here is emulated. The PS5 has an 8-core AMD Zen 2 CPU and runs a FreeBSD-based system, so llama.cpp builds for it almost unchanged: three build flags, one small library shim and one patch. This is what runs on the console, in order:</p>
+      <div class="panel">
+        <ol class="chain">
+          <li><b>relapse</b><span>the browser exploit opens the console (firmware 7.00 to 13.60)</span></li>
+          <li><b>loader</b><span>a payload loader accepts homebrew programs</span></li>
+          <li><b>llama-server</b><span>upstream llama.cpp, built with the open ps5-payload-dev SDK</span></li>
+          <li><b>model</b><span>a GGUF file from Hugging Face, read into memory</span></li>
+          <li><b>browser</b><span>the PS5's own browser opens the chat page the console serves</span></li>
+        </ol>
+      </div>
+      <p>A phone or laptop on the same network can open the same chat page, and the server speaks the OpenAI API, so other apps can use the PS5 as a small model server.</p>
+    </div>
+  </section>
+
+  <section id="numbers">
+    <div class="wrap">
+      <h2>Measured on the console</h2>
+      <div class="grid">
+        <div class="stat">
+          <p class="value">13 to 22 tok/s</p>
+          <p>Qwen3.5 0.8B generating text, with the prompt read at 38 to 67 tokens a second.</p>
+        </div>
+        <div class="stat">
+          <p class="value">5 of 16 cores</p>
+          <p>The CPU threads a homebrew program may use. System services share them too.</p>
+        </div>
+        <div class="stat">
+          <p class="value">about 6 GB</p>
+          <p>The memory one homebrew program can hold, from the pool the home screen also uses.</p>
+        </div>
+        <div class="stat">
+          <p class="value">4 seconds</p>
+          <p>To load a 0.5 GB model from the console's SSD.</p>
+        </div>
+      </div>
+      <h3 class="lessons">What the console taught us</h3>
+      <ul>
+        <li>llama.cpp starts one busy-waiting thread per core. On a PS5 that takes every core homebrew gets, and the console shuts itself down. The PS5 build leaves two cores free.</li>
+        <li>llama.cpp's own web interface renders blank in the PS5 browser, so PS5LM ships a plain chat page.</li>
+        <li>A model mapped from disk gets paged out once the browser opens; reading it into memory keeps generation fast.</li>
+      </ul>
+      <p>The full notes are in <a href="https://github.com/cobanov/PS5LM/blob/main/docs/CONSOLE.md">docs/CONSOLE.md</a>.</p>
+    </div>
+  </section>
+
+  <section id="roadmap">
+    <div class="wrap">
+      <h2>Roadmap</h2>
+      <ul class="roadmap">
+        <li><span class="state done">done</span><span>llama.cpp builds for the PS5 and runs small models on its CPU</span></li>
+        <li><span class="state done">done</span><span>Chat in the PS5's own browser, with the DualSense and the on-screen keyboard</span></li>
+        <li><span class="state">next</span><span>The PS5LM app: one payload from Payload Manager. Pick a model that fits, download it from Hugging Face on the console, chat.</span></li>
+        <li><span class="state">later</span><span>Bigger models, Qwen 3.8 27B first, in a native app that gets more memory than a payload</span></li>
+        <li><span class="state">later</span><span>The GPU, through llama.cpp's Vulkan backend on a community Vulkan driver for the PS5</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="try">
+    <div class="wrap">
+      <h2>Try it</h2>
+      <p>Today this is a developer setup: you build on a Mac or Linux machine and start the server on the console from there. The one-step app is next.</p>
+      <pre class="panel"><span class="dim"># on your computer</span>
+git clone --recursive https://github.com/cobanov/PS5LM
+cd PS5LM
+scripts/setup-sdk.sh &amp;&amp; source scripts/env.sh
+scripts/build-llama.sh
+
+<span class="dim"># console jailbroken, ftpsrv and shsrv running, a model in /data/PS5LM/models</span>
+PS5_HOST=192.168.1.50 scripts/ps5-chat.sh model.gguf</pre>
+      <p>The <a href="https://github.com/cobanov/PS5LM#readme">README</a> has the details, and <a href="https://github.com/cobanov/PS5LM/blob/main/docs/MODELS.md">docs/MODELS.md</a> lists models that fit.</p>
+    </div>
+  </section>
+
+  <section id="faq" class="faq">
+    <div class="wrap">
+      <h2>Questions</h2>
+      <h3>Does this run games or need any Sony code?</h3>
+      <p>No. PS5LM runs open-weight language models and nothing else. No games, keys, firmware or Sony files are part of it.</p>
+      <h3>Why the CPU and not the GPU?</h3>
+      <p>The CPU path needs nothing but the open payload SDK, so it came first. The GPU is the next big step, through a community Vulkan driver for the PS5.</p>
+      <h3>How big a model can it run?</h3>
+      <p>A homebrew payload can hold about 6 GB including the context. Models up to 3B parameters have run so far, and 4-bit models up to about 8B should fit. Bigger ones need a native app, which is on the roadmap.</p>
+      <h3>Can it break my console?</h3>
+      <p>It does not write to system files. Pushing the CPU or memory too hard can freeze the console until you hold the power button; the defaults are set to avoid that.</p>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="foot-row">
+      <span>ps5lm, by <a href="https://cobanov.dev">Mert Cobanov</a></span>
+      <a href="https://github.com/cobanov/PS5LM">GitHub</a>
+      <a href="https://github.com/ggml-org/llama.cpp">llama.cpp</a>
+      <a href="https://github.com/ps5-payload-dev">ps5-payload-dev</a>
+    </div>
+    <p>PS5LM is not affiliated with Sony Interactive Entertainment. PlayStation and PS5 are its trademarks.</p>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var video = document.getElementById('demo');
+    var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (still) {
+      video.setAttribute('controls', '');
+      return;
+    }
+    video.autoplay = true;
+    var p = video.play();
+    if (p && p.catch) p.catch(function () { video.setAttribute('controls', ''); });
+    video.addEventListener('click', function () { if (video.paused) video.play(); else video.pause(); });
+  })();
+</script>
+</body>
+</html>

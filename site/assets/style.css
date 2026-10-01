@@ -1,0 +1,264 @@
+/*
+ * ps5lm.cobanov.dev
+ *
+ * Same family as cobanov.dev and herdrchat.cobanov.dev: the dark ground, the
+ * self-hosted Recursive (mono cut for the wordmark, headings and buttons, sans
+ * cut for reading), hairline rules between sections, near-square corners, the
+ * 1160px measure and the periwinkle accent. The one thing this page adds is
+ * the console itself: the demo video in the hero, and the boot chain set as a
+ * terminal panel, since that is how the project actually runs.
+ */
+
+@font-face {
+  font-family: "Recursive Sans";
+  src: url("/assets/fonts/recursive-sans-v1.woff2") format("woff2");
+  font-weight: 300 1000;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Recursive Mono";
+  src: url("/assets/fonts/recursive-mono-v1.woff2") format("woff2");
+  font-weight: 300 1000;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: dark;
+
+  --bg: #0e0e14;
+  --bg-elevated: #16161d;
+  --panel: #17171f;
+
+  --ink: #f2f2f7;
+  --ink-soft: rgba(235, 235, 245, 0.78);
+  --muted: rgba(235, 235, 245, 0.55);
+  --muted-2: rgba(235, 235, 245, 0.38);
+  --line: rgba(235, 235, 245, 0.12);
+  --line-strong: rgba(235, 235, 245, 0.22);
+
+  --accent: #8288f0;
+  --accent-ink: #ffffff;
+  --done: #7fd1a8;
+
+  --term-text: #d4d6dd;
+  --term-dim: rgba(235, 235, 245, 0.42);
+
+  --radius-lg: 6px;
+  --radius-md: 4px;
+  --radius-sm: 2px;
+
+  --max: 1160px;
+  --measure: 46rem;
+
+  --mono: "Recursive Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --body: "Recursive Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; scroll-padding-top: 76px; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent); }
+a:focus-visible, .btn:focus-visible, video:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
+
+.wrap { max-width: var(--max); margin: 0 auto; padding: 0 1.5rem; }
+
+/* ---------- header ---------- */
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  border-bottom: 1px solid var(--line);
+  background: rgba(14, 14, 20, 0.92);
+  backdrop-filter: saturate(140%) blur(8px);
+}
+.nav { display: flex; align-items: center; gap: 1.25rem; min-height: 60px; }
+.brand {
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 1.05rem;
+}
+.nav-spacer { flex: 1; }
+.nav-links { display: flex; gap: 1.15rem; font-size: 0.9rem; }
+.nav-links a { color: var(--muted); text-decoration: none; }
+.nav-links a:hover { color: var(--ink); }
+
+/* ---------- buttons ---------- */
+
+.cta { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 2rem; }
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-strong);
+  background: var(--bg-elevated);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.875rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+}
+.btn:hover { border-color: var(--muted-2); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn-primary:hover { opacity: 0.9; }
+
+/* ---------- hero ---------- */
+
+.hero { padding: 4.5rem 0 4rem; border-bottom: 1px solid var(--line); }
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4rem;
+  align-items: center;
+}
+.display {
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: -0.045em;
+  line-height: 1.05;
+  font-size: clamp(2.3rem, 5vw, 3.6rem);
+  margin: 0 0 1.4rem;
+}
+.lede { font-size: 1.15rem; color: var(--ink-soft); max-width: 34rem; margin: 0; }
+.hero-note { color: var(--muted); font-size: 0.9rem; margin: 1.1rem 0 0; max-width: 34rem; }
+
+/* The console, filmed: portrait phone video in a plain frame. */
+.demo { margin: 0; width: min(340px, 80vw); }
+.demo video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line-strong);
+  background: #000;
+  cursor: pointer;
+}
+.demo figcaption { color: var(--muted); font-size: 0.82rem; margin-top: 0.7rem; }
+
+/* ---------- sections ---------- */
+
+section { padding: 3.5rem 0; }
+section + section { border-top: 1px solid var(--line); }
+h2 {
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  font-size: 1.35rem;
+  margin: 0 0 1.25rem;
+}
+h3 {
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-size: 1rem;
+  margin: 0 0 0.4rem;
+}
+p { margin: 0 0 1rem; max-width: var(--measure); color: var(--ink-soft); }
+strong { color: var(--ink); }
+code {
+  font-family: var(--mono);
+  font-size: 0.875em;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.1em 0.35em;
+  color: var(--ink);
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 1.1rem 1.25rem;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  line-height: 1.75;
+  color: var(--term-text);
+  overflow-x: auto;
+  max-width: var(--measure);
+  margin: 0 0 1.5rem;
+}
+.panel .dim { color: var(--term-dim); }
+.panel .you { color: var(--accent); }
+
+/* The boot chain: what runs, in order, on the console. */
+.chain { list-style: none; padding: 0; margin: 0; }
+.chain li { display: grid; grid-template-columns: 8.5rem 1fr; gap: 0 1rem; }
+.chain li + li { margin-top: 0.35rem; }
+.chain b { color: var(--accent); font-weight: 600; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 1.5rem 2rem;
+}
+.stat .value {
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-size: 1.15rem;
+  color: var(--ink);
+  margin: 0 0 0.3rem;
+}
+.stat p { color: var(--muted); margin: 0; font-size: 0.94rem; }
+
+ul { padding-left: 1.15rem; max-width: var(--measure); color: var(--ink-soft); }
+li { margin: 0.4rem 0; }
+
+.roadmap { list-style: none; padding: 0; max-width: var(--measure); margin: 0; }
+.roadmap li {
+  display: grid;
+  grid-template-columns: 4rem 1fr;
+  gap: 0 1rem;
+  padding: 0.7rem 0;
+  border-bottom: 1px solid var(--line);
+  margin: 0;
+}
+.roadmap .state { font-family: var(--mono); font-size: 0.85rem; color: var(--muted); }
+.roadmap .state.done { color: var(--done); }
+
+.faq h3 { margin-top: 1.6rem; }
+.faq h3:first-of-type { margin-top: 0; }
+
+/* ---------- footer ---------- */
+
+.site-footer { border-top: 1px solid var(--line); padding: 2rem 0 3rem; color: var(--muted); font-size: 0.9rem; }
+.site-footer a { color: var(--muted); }
+.site-footer a:hover { color: var(--ink); }
+.site-footer p { color: var(--muted); max-width: none; }
+.foot-row { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin-bottom: 0.8rem; }
+
+@media (max-width: 860px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 2.5rem; }
+  .demo { justify-self: center; }
+}
+@media (max-width: 620px) {
+  .nav-links { display: none; }
+  .hero { padding: 3rem 0 2.5rem; }
+  .chain li { grid-template-columns: 1fr; }
+  .chain li + li { margin-top: 0.7rem; }
+  .roadmap li { grid-template-columns: 1fr; }
+}
+
+.lessons { margin-top: 2.5rem; }

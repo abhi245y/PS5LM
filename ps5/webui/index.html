@@ -6,8 +6,9 @@
 <title>PS5LM</title>
 <!--
   The chat page llama-server serves on the PS5 (ps5lm.elf, port 8081).
-  cobanov.dev's palette, laid out like a plain chat client: one reading
-  column, your messages in a quiet box, answers as text. Plain ES5 and
+  cobanov.dev's palette in the PS5's own type (SST, the system font, when the
+  browser has it), laid out like a plain chat client: one reading column,
+  your messages in a quiet box, answers as text. Plain ES5 and
   XMLHttpRequest with no external files, because the PS5 browser renders
   modern bundles blank. Sized from the viewport, so it reads on a TV and on
   a phone.
@@ -16,19 +17,20 @@
 <style>
   :root {
     --bg: #000000; --surface: #0b0b0b; --raised: #0f0f0f; --field: #0d0b0b;
-    --border: #2b2523; --text: #fafafa; --body: #ebebeb; --muted: #aaa39f; --faint: #8f8f8f;
-    --accent: #6e81e4; --fill: #0e1e6a; --fill-hover: #152886;
+    --border: #2b2523; --text: #fafafa; --body: #ebebeb; --muted: #b5aea9; --faint: #9a9a9a;
+    --accent: #6e81e4; --button: #fafafa; --quiet: #141414;
   }
-  html { font-size: clamp(16px, 1.15vw, 23px); -webkit-text-size-adjust: 100%; }
+  html { font-size: clamp(17px, 1.3vw, 26px); -webkit-text-size-adjust: 100%; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--body);
-    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; }
+    font-family: "SST", "SST Roman", "SST-Roman", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.55; }
   body { display: flex; flex-direction: column; }
   a { color: var(--accent); text-decoration: none; }
-  :focus-visible, button:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 3px; }
+  /* The PS5's own focus: a white frame around what the cursor is on. */
+  :focus-visible, button:focus, input:focus { outline: 3px solid var(--text); outline-offset: 2px; }
 
   .top { display: flex; align-items: center; gap: 1rem; height: 3.5rem; padding: 0 1.5rem;
     border-bottom: 1px solid var(--border); }
-  .brand { color: var(--text); font-weight: 600; letter-spacing: -0.02em; }
+  .brand { color: var(--text); font-weight: 500; }
   .model { color: var(--muted); font-size: 0.875rem; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .top a { font-size: 0.875rem; padding: 0.5rem 0; }
 
@@ -36,17 +38,17 @@
   .column { max-width: 46rem; margin: 0 auto; padding: 2rem 1.5rem; }
 
   .empty { padding-top: 12vh; }
-  .empty h1 { color: var(--text); font-size: 1.875rem; font-weight: 400; letter-spacing: -0.02em; margin: 0 0 0.5rem; }
+  .empty h1 { color: var(--text); font-size: 2.25rem; font-weight: 300; margin: 0 0 0.4rem; }
   .empty p { color: var(--muted); margin: 0 0 2rem; }
   .ideas { display: flex; flex-direction: column; gap: 0.6rem; }
   .idea { text-align: left; font: inherit; font-size: 1rem; color: var(--body); background: var(--surface);
-    border: 1px solid var(--border); border-radius: 10px; padding: 0.85rem 1.1rem; cursor: pointer; }
-  .idea:hover { background: var(--raised); color: var(--text); }
+    border: 1px solid var(--border); border-radius: 4px; padding: 0.85rem 1.1rem; cursor: pointer; }
+  .idea:hover { background: var(--quiet); color: var(--text); }
 
   .msg { margin: 0 0 1.75rem; white-space: pre-wrap; word-wrap: break-word; }
   .me { display: flex; justify-content: flex-end; }
   .me div { background: var(--raised); border: 1px solid var(--border); color: var(--text);
-    border-radius: 14px; padding: 0.6rem 1rem; max-width: 80%; }
+    border-radius: 6px; padding: 0.6rem 1rem; max-width: 80%; }
   .bot { color: var(--body); }
   .bot .meta { display: block; color: var(--faint); font-size: 0.8125rem; margin-top: 0.4rem; }
   .bot .error { color: #e5a29a; }
@@ -55,12 +57,12 @@
   .composer { border-top: 1px solid var(--border); background: var(--bg); }
   .composer form { max-width: 46rem; margin: 0 auto; padding: 1rem 1.5rem 1.25rem; display: flex; gap: 0.6rem; }
   .composer input { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--surface);
-    border: 1px solid var(--border); border-radius: 12px; padding: 0.8rem 1rem; }
+    border: 1px solid var(--border); border-radius: 4px; padding: 0.8rem 1rem; }
   .composer input::placeholder { color: var(--faint); }
-  .composer button { font: inherit; font-size: 0.9375rem; font-weight: 500; color: #fff; background: var(--fill);
-    border: 0; border-radius: 12px; padding: 0 1.4rem; cursor: pointer; }
-  .composer button:hover { background: var(--fill-hover); }
-  .composer button.stop { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  .composer button { font: inherit; font-size: 0.9375rem; font-weight: 500; color: #000; background: var(--button);
+    border: 0; border-radius: 4px; padding: 0 1.4rem; cursor: pointer; }
+  .composer button:hover { background: #ffffff; }
+  .composer button.stop { background: var(--quiet); color: var(--text); border: 1px solid var(--border); }
 </style>
 </head>
 <body>

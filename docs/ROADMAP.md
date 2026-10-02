@@ -53,13 +53,13 @@ Expect 1 to 3 tok/s here. Slow, but it is Qwen 3.8 running on a PS5, and the cla
 
 ## Phase 1.5: the launcher and the model library
 
-An Ollama-like way to get models and chat, without a PC in the loop. One payload, `ps5lm.elf`, kept in the loader's autoload:
+An Ollama-like way to get models and chat, without a PC in the loop. One payload, `ps5lm.elf` (v0.1):
 
-- [ ] A small web server (port 8090) with the **model library** page, opened in the PS5's own browser on start (`sceSystemServiceLaunchWebBrowser`, as the SDK's `browser` sample and PS5SX2 do). The same page works from a phone or laptop on the network.
-- [ ] The library: the curated list in [MODELS.md](MODELS.md) as `models.json`, each marked fits / tight / too big from the memprobe numbers, plus whatever is already in `/data/PS5LM/models` or on a USB drive.
-- [ ] **Download** from Hugging Face straight to `/data/PS5LM/models`, with progress and resume. HTTPS through OpenSSL from ps5-payload-dev's pacbrew repository, or Sony's own `libSceHttp2` and `libSceSsl`. The same TLS turns on llama.cpp's `-hf` downloads.
-- [ ] **Run**: start `llama-server` with the chosen model through the local elfldr (`127.0.0.1:9021`), stopping the one before. llama-server's own router mode spawns child processes, which a payload cannot do, so the launcher does the routing.
-- [ ] **Chat** in llama-server's built-in web UI, on the TV through the PS5 browser or from any device on the network, and the OpenAI-compatible API for other apps. If the PS5's WebKit is too old for that UI, the launcher serves a plain chat page instead.
+- [x] A small web server (port 8082) with the **model library** page, opened in the PS5's own browser on start (`sceSystemServiceLaunchWebBrowser`). The same page works from a phone or laptop on the network.
+- [x] The library: a catalog of models measured on the console, plus whatever is already in `/data/PS5LM/models`, with files over the payload limit (1.6 GB locked) refused
+- [x] **Download** from Hugging Face straight to `/data/PS5LM/models`, with progress and resume: cpp-httplib over mbedTLS, 16 connections in parallel (the kernel caps one connection at 0.9 MB/s), about 12.5 MB/s
+- [x] **Run**: llama-server runs inside the same process (`llama_server()`), and switching models stops it (`llama_server_terminate()`) and starts it again, with the model locked in memory
+- [x] **Chat** in a plain page (llama.cpp's own UI renders blank in the PS5 browser), on the TV or from any device on the network, and the OpenAI-compatible API on port 8081
 
 **Done when** a model can be picked, downloaded and chatted with using only the DualSense.
 

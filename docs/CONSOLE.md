@@ -48,7 +48,19 @@ Chat through `llama-server` and `ps5/webui` in the PS5's browser (browser open, 
 | Qwen3.5 0.8B Q4_K_M, thinking off | 67 tok/s | 13.1 tok/s |
 | Granite 4.2 3B Q4_K_M | 0.6 tok/s | 0.2 tok/s |
 
-Granite is 4 times bigger but 65 times slower: something in that architecture's CPU path, to look into. llama.cpp's own web UI renders blank in the PS5 browser; `ps5/webui` (plain ES5) works.
+llama.cpp's own web UI renders blank in the PS5 browser; `ps5/webui` (plain ES5) works.
+
+## Payload memory gets paged out
+
+Models over ~1 GB ran 10 to 65 times slower than their size suggests (Granite 4.2 3B at 0.2 tok/s, Qwen3.5 2B at 0.9 tok/s). The reason is paging, not the architecture: while the PS5 browser is in front, the system pages a background payload's memory out to disk. An idle ps5lm was found holding 6 MB of a 600 MB model; the next request paged it back in at 0.3 tok/s.
+
+Locking the weights (`-lm mlock`) fixes it: Qwen3.5 2B went from 0.9 to **8.5 to 9.2 tok/s** and stayed at 1.4 GB resident. Locked pages come out of the pool the home screen needs, though: 1.4 GB locked was fine, **2.7 GB (Qwen3.5 4B) froze the console**. ps5lm locks every model and refuses files over 1.6 GB.
+
+## Downloads
+
+- Sony's `libSceHttp2` cannot send a request from a payload (`sceHttp2SendRequest` fails); plain sockets, DNS and TCP 443 work. ps5lm uses cpp-httplib over mbedTLS 3.6.7 with the Mozilla CA list.
+- The kernel caps `SO_RCVBUF` at 64 KB, whatever is asked for. With the Hugging Face CDN ~150 ms away, one connection tops out at 0.9 MB/s.
+- 16 connections fetching 8 MiB pieces in parallel: **about 12.5 MB/s** (Qwen3.5 4B, 2.6 GB, in 217 s).
 
 At exit, Sony's libc prints `[SceLibc] A heap error is detected` (SceLibcInternalHeap) after all work is done. Not investigated yet.
 

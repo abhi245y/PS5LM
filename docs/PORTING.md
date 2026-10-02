@@ -20,6 +20,10 @@ Build options: AVX, AVX2, FMA, F16C and BMI2 on, AVX-512 off (Zen 2), no OpenMP 
 
 1. **`0001-ps5-safe-cpu-defaults.patch`.** A payload may only use 5 of the 16 logical CPUs, and system services share them. llama.cpp's defaults (one thread per physical core, busy-waiting at `--poll 50`) took all five and the console shut down. On `__PROSPERO__` the default thread count becomes the CPUs in the affinity mask (`scePthreadGetaffinity`) minus two, and polling defaults to 0. `-t` and `--poll` still override.
 
+## The build
+
+`ps5/CMakeLists.txt` is the top-level project: it adds llama.cpp as a subdirectory and the `ps5lm` payload next to it. `ps5lm` links `llama-server-impl` and calls `llama_server(argc, argv)` itself, and carries its two pages and the Mozilla CA list inside the binary (`ps5lm_embed`). cpp-httplib is compiled with `CPPHTTPLIB_MBEDTLS_SUPPORT` everywhere, so its classes match in every file that includes it, and mbedTLS (`scripts/build-mbedtls.sh`) is linked last with the compat library.
+
 ## Output
 
 `build/llama-ps5/bin/`: `llama-cli` (20 MB), `llama-server` (20 MB), `llama-bench` (13 MB), position independent FreeBSD ELFs that import from `libSceLibcInternal.sprx`, `libkernel_web.sprx` and `libSceNet.sprx`. The only weak import is `__cxa_thread_atexit_impl`, which libc++abi checks for before use.

@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PS5LM</title>
+<!--
+  The model library ps5lm.elf serves on port 8082 and opens in the PS5
+  browser. Plain ES5 and XMLHttpRequest, no external files: the PS5 browser
+  renders modern bundles blank. Sized for a TV, works on a phone too.
+  SPDX-License-Identifier: GPL-3.0-or-later
+-->
+<style>
+  :root { --bg: #0e0e14; --panel: #17171f; --line: rgba(235,235,245,0.12); --ink: #f2f2f7;
+    --soft: rgba(235,235,245,0.78); --muted: rgba(235,235,245,0.55); --accent: #8288f0; --ok: #7fd1a8; --bad: #f08a8a; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+  header { display: flex; align-items: baseline; gap: 18px; padding: 20px 40px; border-bottom: 1px solid var(--line); }
+  header b { font-family: Menlo, Consolas, monospace; font-size: 26px; letter-spacing: -0.04em; }
+  header span { color: var(--muted); font-size: 18px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 40px 60px; }
+  h2 { font-family: Menlo, Consolas, monospace; font-size: 22px; letter-spacing: -0.03em; margin: 28px 0 14px; }
+  .chat { display: flex; align-items: center; gap: 18px; padding: 18px 22px; border: 1px solid var(--line);
+    border-left: 3px solid var(--accent); background: var(--panel); border-radius: 6px; font-size: 22px; }
+  .chat .what { flex: 1; color: var(--soft); }
+  .row { display: flex; align-items: center; gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+  .row .info { flex: 1; }
+  .row .name { font-size: 24px; font-weight: 600; }
+  .row .note { color: var(--muted); font-size: 18px; margin-top: 4px; }
+  .row .size { color: var(--muted); font-size: 18px; width: 110px; text-align: right; }
+  .bar { height: 8px; background: var(--line); border-radius: 4px; margin-top: 10px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--accent); width: 0; }
+  .status { color: var(--muted); font-size: 17px; margin-top: 6px; }
+  .status.bad { color: var(--bad); }
+  button, a.btn { font-size: 20px; padding: 12px 22px; border-radius: 6px; border: 1px solid rgba(235,235,245,0.22);
+    background: #16161d; color: var(--ink); text-decoration: none; cursor: pointer; font-family: inherit; }
+  button.primary, a.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:focus, a.btn:focus { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .ok { color: var(--ok); }
+  p.foot { color: var(--muted); font-size: 16px; margin-top: 28px; }
+</style>
+</head>
+<body>
+<header><b>ps5lm</b><span>models on your PlayStation 5</span></header>
+<main>
+  <div class="chat" id="chat"><span class="what">Starting...</span></div>
+
+  <h2>Models</h2>
+  <div id="catalog"></div>
+
+  <h2 id="other-title" style="display:none">Other models on the console</h2>
+  <div id="other"></div>
+
+  <p class="foot" id="foot"></p>
+</main>
+<script>
+(function () {
+  var host = location.hostname;
+  var state = null;
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+  function gb(bytes) { return (bytes / 1073741824).toFixed(bytes < 1073741824 ? 2 : 1) + ' GB'; }
+  function mb(bytes) { return (bytes / 1048576).toFixed(1) + ' MB/s'; }
+
+  function post(path) {
+    var x = new XMLHttpRequest();
+    x.open('POST', path);
+    x.onloadend = refresh;
+    x.send();
+  }
+  function button(label, cls, path) {
+    var b = el('button', cls, label);
+    b.onclick = function () { post(path); };
+    return b;
+  }
+
+  function renderChat(chat) {
+    var box = document.getElementById('chat');
+    box.innerHTML = '';
+    var url = 'http://' + host + ':' + chat.port + '/';
+    if (chat.model && chat.ready) {
+      box.appendChild(el('span', 'what', 'Running ' + chat.model));
+      var a = el('a', 'btn primary', 'Open chat');
+      a.href = url;
+      box.appendChild(a);
+      box.appendChild(button('Stop', '', '/api/stop'));
+    } else if (chat.model) {
+      box.appendChild(el('span', 'what', 'Loading ' + chat.model + '...'));
+    } else if (chat.error) {
+      box.appendChild(el('span', 'what', chat.error));
+    } else {
+      box.appendChild(el('span', 'what', 'Download a model below, then run it.'));
+    }
+  }
+
+  function renderModel(m, chat) {
+    var row = el('div', 'row');
+    var info = el('div', 'info');
+    info.appendChild(el('div', 'name', m.name));
+    info.appendChild(el('div', 'note', m.note));
+    var d = m.download;
+    if (d && d.active) {
+      var bar = el('div', 'bar');
+      var fill = el('i');
+      fill.style.width = (d.total ? Math.floor(100 * d.done / d.total) : 0) + '%';
+      bar.appendChild(fill);
+      info.appendChild(bar);
+      info.appendChild(el('div', 'status', gb(d.done) + ' of ' + gb(d.total) + (d.speed ? ', ' + mb(d.speed) : '')));
+    } else if (d && d.error && !m.installed) {
+      info.appendChild(el('div', 'status' + (d.error === 'paused' ? '' : ' bad'),
+        d.error === 'paused' ? 'Paused at ' + gb(d.done) : d.error));
+    }
+    row.appendChild(info);
+    row.appendChild(el('div', 'size', gb(m.size)));
+
+    if (d && d.active) {
+      row.appendChild(button('Cancel', '', '/api/cancel?id=' + encodeURIComponent(m.id)));
+    } else if (m.installed && state.max_model && m.size > state.max_model) {
+      row.appendChild(el('span', 'status bad', 'Too big for a payload'));
+      row.appendChild(button('Delete', '', '/api/delete?file=' + encodeURIComponent(m.file)));
+    } else if (m.installed) {
+      if (chat.model === m.file) {
+        row.appendChild(el('span', 'ok', chat.ready ? 'Running' : 'Loading'));
+      } else {
+        row.appendChild(button('Run', 'primary', '/api/run?file=' + encodeURIComponent(m.file)));
+        row.appendChild(button('Delete', '', '/api/delete?file=' + encodeURIComponent(m.file)));
+      }
+    } else {
+      row.appendChild(button(d && d.done ? 'Resume' : 'Download', 'primary',
+        '/api/download?id=' + encodeURIComponent(m.id)));
+    }
+    return row;
+  }
+
+  function render() {
+    renderChat(state.chat);
+    var list = document.getElementById('catalog');
+    list.innerHTML = '';
+    var known = {};
+    for (var i = 0; i < state.catalog.length; i++) {
+      known[state.catalog[i].file] = true;
+      list.appendChild(renderModel(state.catalog[i], state.chat));
+    }
+    // Models copied over FTP or USB that are not in the catalog.
+    var other = document.getElementById('other');
+    other.innerHTML = '';
+    var count = 0;
+    for (var j = 0; j < state.installed.length; j++) {
+      var f = state.installed[j];
+      if (known[f.file]) continue;
+      count++;
+      other.appendChild(renderModel({ id: '', name: f.file, note: 'Copied to /data/PS5LM/models',
+        file: f.file, size: f.size, installed: true }, state.chat));
+    }
+    document.getElementById('other-title').style.display = count ? '' : 'none';
+    document.getElementById('foot').textContent = 'PS5LM ' + state.version + '. ' +
+      (state.free >= 0 ? gb(state.free) + ' free on the console. ' : '') +
+      (state.ip ? 'From a phone or computer on the same network: http://' + state.ip + ':' + state.port + '/' : '');
+  }
+
+  function refresh() {
+    var x = new XMLHttpRequest();
+    x.open('GET', '/api/state');
+    x.onload = function () {
+      try { state = JSON.parse(x.responseText); render(); } catch (e) {}
+    };
+    x.send();
+  }
+
+  refresh();
+  setInterval(refresh, 1500);
+})();
+</script>
+</body>
+</html>

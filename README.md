@@ -10,7 +10,19 @@
 
 The first target is **Qwen 3.8** (27B, hybrid Gated DeltaNet attention), the newest open Qwen. No one has run it on a PS5 yet.
 
-> **Status:** llama.cpp runs on a PS5. Qwen3.5 0.8B generates 14 tokens/s on two of the console's CPU cores (firmware 13.60, PS5 Slim). There is a chat page in the PS5's own browser (`scripts/ps5-chat.sh`). Next: bigger models. See [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/CONSOLE.md](docs/CONSOLE.md).
+> **Status:** v0.1 is out. One payload, `ps5lm.elf`, opens a model library in the PS5's browser: download a model on the console, run it, chat. Small models for now (up to 1.6 GB, Qwen3.5 0.8B and 2B). See [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/CONSOLE.md](docs/CONSOLE.md).
+
+## Install
+
+You need a PS5 you own on firmware 7.00 to 13.60, jailbroken, with a payload loader (Payload Manager from WebKit Autoloader, or elfldr on port 9021).
+
+1. Download `ps5lm.elf` from the [latest release](https://github.com/cobanov/PS5LM/releases/latest).
+2. Load it like any payload: in Payload Manager, add it under *Manage payloads* and start it; or send it to an ELF loader on port 9021.
+3. The PS5's browser opens the PS5LM library. Press **Download** on a model, then **Run**, then **Open chat**. Type with the DualSense.
+
+The library also works from a phone or computer on the same network at `http://<console IP>:8082`, and the chat at port 8081 speaks the OpenAI API. Models are stored in `/data/PS5LM/models`; a GGUF copied there over FTP shows up too.
+
+Limits for now: a payload can only keep about 1.6 GB of model locked in memory without starving the home screen, so the catalog has Qwen3.5 0.8B (13 to 21 tok/s) and Qwen3.5 2B (about 9 tok/s). Bigger models need a native app ([#4](https://github.com/cobanov/PS5LM/issues/4)).
 
 ## Why llama.cpp
 
@@ -27,7 +39,7 @@ Earlier PS5 LLM work hand-writes GPU kernels for one model at a time. PS5LM port
 | `scripts/` | SDK setup, the llama.cpp cross build, sending payloads |
 | `docs/` | [roadmap](docs/ROADMAP.md), [models that fit](docs/MODELS.md), [porting notes](docs/PORTING.md), [research](docs/RESEARCH.md) |
 
-## Building
+## Building from source
 
 Needs the [ps5-payload-dev SDK](https://github.com/ps5-payload-dev/sdk) and a host LLVM.
 

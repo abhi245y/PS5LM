@@ -262,3 +262,6 @@ li { margin: 0.4rem 0; }
 }
 
 .lessons { margin-top: 2.5rem; }
+
+.steps-list { max-width: var(--measure); color: var(--ink-soft); padding-left: 1.3rem; margin: 0 0 1.25rem; }
+.steps-list li { margin: 0.5rem 0; }

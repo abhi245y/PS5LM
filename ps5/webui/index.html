@@ -95,8 +95,17 @@
 
 <script>
 (function () {
-  var SYSTEM = 'You are a helpful assistant running on a PlayStation 5. ' +
-    'Answer in one to three short sentences, in the language the user writes in.';
+  // What the model knows about itself. The name fills in from /v1/models.
+  var modelName = 'a language model';
+  // Small models copy an example answer far better than they follow a rule.
+  function systemPrompt() {
+    return 'You are ' + modelName + ', an open-weight language model running locally on this ' +
+      'PlayStation 5 with PS5LM, a port of llama.cpp. You run on the console\'s own CPU, offline, and ' +
+      'the conversation stays on this console. If someone asks who you are or where you run, answer in ' +
+      'their language along the lines of: "I\'m ' + modelName + ', running right here on this PS5\'s own ' +
+      'processor with PS5LM." Keep answers to one to three short sentences unless asked for more, and ' +
+      'always reply in the language the user writes in.';
+  }
   var log = document.getElementById('log');
   var scroller = document.getElementById('scroll');
   var form = document.getElementById('form');
@@ -114,8 +123,9 @@
     try {
       var id = JSON.parse(info.responseText).data[0].id;
       // Qwen3.5-2B-Q4_K_M.gguf reads as Qwen3.5 2B.
-      document.getElementById('model').textContent = id.split('/').pop().replace(/\.gguf$/, '')
+      modelName = id.split('/').pop().replace(/\.gguf$/, '')
         .replace(/-(UD-)?(I?Q[0-9].*|BF16|F16|F32)$/i, '').replace(/-/g, ' ');
+      document.getElementById('model').textContent = modelName;
     } catch (e) {}
   };
   info.send();
@@ -205,7 +215,7 @@
 
     // Small models on a few CPU cores: short answers, no thinking phase.
     xhr.send(JSON.stringify({
-      messages: [{ role: 'system', content: SYSTEM }].concat(messages),
+      messages: [{ role: 'system', content: systemPrompt() }].concat(messages),
       stream: true,
       max_tokens: 256,
       chat_template_kwargs: { enable_thinking: false }

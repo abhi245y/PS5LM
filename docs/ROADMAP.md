@@ -61,7 +61,7 @@ An Ollama-like way to get models and chat, without a PC in the loop. One payload
 - [x] **Run**: llama-server runs inside the same process (`llama_server()`), and switching models stops it (`llama_server_terminate()`) and starts it again, with the model locked in memory
 - [x] **Chat** in a plain page (llama.cpp's own UI renders blank in the PS5 browser), on the TV or from any device on the network, and the OpenAI-compatible API on port 8081
 
-**Done when** a model can be picked, downloaded and chatted with using only the DualSense.
+**Done when** a model can be picked, downloaded and chatted with using only the DualSense. Done in v0.1.0 (2026-10-02); v0.1.1 restyled the pages. Payload Manager installs it from `https://ps5lm.cobanov.dev/payloads.json`, and a listing in the default mirror is requested (itsPLK/ps5-payloads-mirror#19).
 
 ## Phase 2: fit and speed on the CPU
 

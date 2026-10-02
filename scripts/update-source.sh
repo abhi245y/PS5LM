@@ -10,15 +10,14 @@ set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 version=${1:?usage: update-source.sh VERSION}
 url="https://github.com/cobanov/PS5LM/releases/download/$version/ps5lm.elf"
-tmp=$(mktemp)
-trap 'rm -f "$tmp"' EXIT
 
-# Hash what the release actually serves, not a local build.
-curl -fsSL -o "$tmp" "$url"
-if command -v sha256sum >/dev/null; then
-    sum=$(sha256sum "$tmp" | cut -d' ' -f1)
-else
-    sum=$(shasum -a 256 "$tmp" | cut -d' ' -f1)
+# The checksum of the asset as GitHub records it. Downloading it to hash
+# can return a cached older file when a release was recreated.
+sum=$(gh api "repos/cobanov/PS5LM/releases/tags/$version" \
+    --jq '.assets[] | select(.name == "ps5lm.elf") | .digest' | sed 's/^sha256://')
+if [ -z "$sum" ]; then
+    echo "update-source: no ps5lm.elf in release $version" >&2
+    exit 1
 fi
 
 python3 - "$version" "$url" "$sum" "$root/site/payloads.json" <<'EOF'

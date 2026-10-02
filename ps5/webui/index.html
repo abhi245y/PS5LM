@@ -5,108 +5,156 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PS5LM</title>
 <!--
-  The chat page llama-server serves on the PS5 (llama-server --path www).
-  llama.cpp's own web UI renders blank in the PS5 browser, so this page sticks
-  to plain ES5 and XMLHttpRequest, with no external files. Sized for a TV.
+  The chat page llama-server serves on the PS5 (ps5lm.elf, port 8081).
+  cobanov.dev's palette, laid out like a plain chat client: one reading
+  column, your messages in a quiet box, answers as text. Plain ES5 and
+  XMLHttpRequest with no external files, because the PS5 browser renders
+  modern bundles blank. Sized from the viewport, so it reads on a TV and on
+  a phone.
   SPDX-License-Identifier: GPL-3.0-or-later
 -->
 <style>
   :root {
-    --bg: #0b0d12;
-    --panel: #151923;
-    --text: #e8ebf2;
-    --muted: #8a93a6;
-    --accent: #3d7bfd;
-    --user: #1f2a44;
-    --border: #262c3a;
+    --bg: #000000; --surface: #0b0b0b; --raised: #0f0f0f; --field: #0d0b0b;
+    --border: #2b2523; --text: #fafafa; --body: #ebebeb; --muted: #aaa39f; --faint: #8f8f8f;
+    --accent: #6e81e4; --fill: #0e1e6a; --fill-hover: #152886;
   }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
-    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+  html { font-size: clamp(16px, 1.15vw, 23px); -webkit-text-size-adjust: 100%; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--body);
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; }
   body { display: flex; flex-direction: column; }
-  header { display: flex; align-items: baseline; gap: 16px; padding: 18px 32px;
+  a { color: var(--accent); text-decoration: none; }
+  :focus-visible, button:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  .top { display: flex; align-items: center; gap: 1rem; height: 3.5rem; padding: 0 1.5rem;
     border-bottom: 1px solid var(--border); }
-  header h1 { margin: 0; font-size: 30px; letter-spacing: 0.5px; }
-  header span { color: var(--muted); font-size: 20px; flex: 1; }
-  header a { color: var(--accent); font-size: 20px; text-decoration: none; }
-  #log { flex: 1; overflow-y: auto; padding: 24px 32px; }
-  .msg { max-width: 1100px; margin: 0 0 18px; padding: 16px 22px; border-radius: 14px;
-    font-size: 26px; line-height: 1.45; white-space: pre-wrap; word-wrap: break-word; }
-  .user { background: var(--user); margin-left: auto; }
-  .bot { background: var(--panel); border: 1px solid var(--border); }
-  .think { color: var(--muted); font-style: italic; font-size: 22px; }
-  .meta { color: var(--muted); font-size: 18px; margin-top: 8px; }
-  form { display: flex; gap: 14px; padding: 18px 32px 26px; border-top: 1px solid var(--border); }
-  #input { flex: 1; font-size: 26px; padding: 16px 18px; border-radius: 12px;
-    border: 1px solid var(--border); background: var(--panel); color: var(--text); }
-  button { font-size: 24px; padding: 0 30px; border-radius: 12px; border: 0;
-    background: var(--accent); color: #fff; }
-  button.stop { background: #a83a3a; }
+  .brand { color: var(--text); font-weight: 600; letter-spacing: -0.02em; }
+  .model { color: var(--muted); font-size: 0.875rem; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .top a { font-size: 0.875rem; padding: 0.5rem 0; }
+
+  .scroll { flex: 1; overflow-y: auto; }
+  .column { max-width: 46rem; margin: 0 auto; padding: 2rem 1.5rem; }
+
+  .empty { padding-top: 12vh; }
+  .empty h1 { color: var(--text); font-size: 1.875rem; font-weight: 400; letter-spacing: -0.02em; margin: 0 0 0.5rem; }
+  .empty p { color: var(--muted); margin: 0 0 2rem; }
+  .ideas { display: flex; flex-direction: column; gap: 0.6rem; }
+  .idea { text-align: left; font: inherit; font-size: 1rem; color: var(--body); background: var(--surface);
+    border: 1px solid var(--border); border-radius: 10px; padding: 0.85rem 1.1rem; cursor: pointer; }
+  .idea:hover { background: var(--raised); color: var(--text); }
+
+  .msg { margin: 0 0 1.75rem; white-space: pre-wrap; word-wrap: break-word; }
+  .me { display: flex; justify-content: flex-end; }
+  .me div { background: var(--raised); border: 1px solid var(--border); color: var(--text);
+    border-radius: 14px; padding: 0.6rem 1rem; max-width: 80%; }
+  .bot { color: var(--body); }
+  .bot .meta { display: block; color: var(--faint); font-size: 0.8125rem; margin-top: 0.4rem; }
+  .bot .error { color: #e5a29a; }
+  .caret { display: inline-block; width: 0.5em; height: 1.1em; vertical-align: text-bottom; background: var(--muted); }
+
+  .composer { border-top: 1px solid var(--border); background: var(--bg); }
+  .composer form { max-width: 46rem; margin: 0 auto; padding: 1rem 1.5rem 1.25rem; display: flex; gap: 0.6rem; }
+  .composer input { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--surface);
+    border: 1px solid var(--border); border-radius: 12px; padding: 0.8rem 1rem; }
+  .composer input::placeholder { color: var(--faint); }
+  .composer button { font: inherit; font-size: 0.9375rem; font-weight: 500; color: #fff; background: var(--fill);
+    border: 0; border-radius: 12px; padding: 0 1.4rem; cursor: pointer; }
+  .composer button:hover { background: var(--fill-hover); }
+  .composer button.stop { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
 </style>
 </head>
 <body>
-<header><h1>PS5LM</h1><span id="model">llama.cpp on PlayStation 5</span><a id="models" href="#">Models</a></header>
-<div id="log"></div>
-<form id="form">
-  <input id="input" type="text" autocomplete="off" placeholder="Type a message">
-  <button id="send" type="submit">Send</button>
-</form>
+<header class="top">
+  <span class="brand">ps5lm</span>
+  <span class="model" id="model"></span>
+  <a id="models" href="#">Models</a>
+</header>
+
+<div class="scroll" id="scroll">
+  <div class="column" id="log">
+    <div class="empty" id="empty">
+      <h1>Ask something</h1>
+      <p>A language model running on this PS5's own processor.</p>
+      <div class="ideas">
+        <button class="idea" type="button">Who are you?</button>
+        <button class="idea" type="button">Write a haiku about the PS5</button>
+        <button class="idea" type="button">Explain how a CPU works in two sentences</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="composer">
+  <form id="form">
+    <input id="input" type="text" autocomplete="off" placeholder="Message">
+    <button id="send" type="submit">Send</button>
+  </form>
+</div>
+
 <script>
 (function () {
+  var SYSTEM = 'You are a helpful assistant running on a PlayStation 5. ' +
+    'Answer in one to three short sentences, in the language the user writes in.';
   var log = document.getElementById('log');
+  var scroller = document.getElementById('scroll');
   var form = document.getElementById('form');
   var input = document.getElementById('input');
   var send = document.getElementById('send');
-  var SYSTEM = 'You are a helpful assistant running on a PlayStation 5. ' +
-    'Answer in one to three short sentences, in the language the user writes in.';
   var messages = [];
   var xhr = null;
 
   // ps5lm.elf serves its model library on port 8082.
   document.getElementById('models').href = 'http://' + location.hostname + ':8082/';
 
-  function bubble(cls, text) {
-    var div = document.createElement('div');
-    div.className = 'msg ' + cls;
-    div.textContent = text || '';
-    log.appendChild(div);
-    log.scrollTop = log.scrollHeight;
-    return div;
-  }
-
-  function busy(on) {
-    send.textContent = on ? 'Stop' : 'Send';
-    send.className = on ? 'stop' : '';
-  }
-
-  // The model name, for the header.
   var info = new XMLHttpRequest();
   info.open('GET', '/v1/models');
   info.onload = function () {
     try {
       var id = JSON.parse(info.responseText).data[0].id;
-      document.getElementById('model').textContent = id.split('/').pop() + ' on PlayStation 5';
+      // Qwen3.5-2B-Q4_K_M.gguf reads as Qwen3.5 2B.
+      document.getElementById('model').textContent = id.split('/').pop().replace(/\.gguf$/, '')
+        .replace(/-(UD-)?(I?Q[0-9].*|BF16|F16|F32)$/i, '').replace(/-/g, ' ');
     } catch (e) {}
   };
   info.send();
 
+  function add(cls) {
+    var empty = document.getElementById('empty');
+    if (empty) empty.parentNode.removeChild(empty);
+    var div = document.createElement('div');
+    div.className = 'msg ' + cls;
+    log.appendChild(div);
+    return div;
+  }
+  function bottom() { scroller.scrollTop = scroller.scrollHeight; }
+  function busy(on) {
+    send.textContent = on ? 'Stop' : 'Send';
+    send.className = on ? 'stop' : '';
+  }
+
   function ask(text) {
     messages.push({ role: 'user', content: text });
-    // Keep the request small: the console's context is 4096 tokens.
     if (messages.length > 12) messages = messages.slice(messages.length - 12);
-    bubble('user', text);
-    var out = bubble('bot', '');
-    var think = null;
-    var answer = '';
-    var reasoning = '';
-    var seen = 0;
-    var pending = '';
-    var started = Date.now();
 
+    var mine = add('me');
+    var box = document.createElement('div');
+    box.textContent = text;
+    mine.appendChild(box);
+
+    var out = add('bot');
+    var body = document.createTextNode('');
+    var caret = document.createElement('span');
+    caret.className = 'caret';
+    out.appendChild(body);
+    out.appendChild(caret);
+    bottom();
+
+    var answer = '', seen = 0, pending = '';
     xhr = new XMLHttpRequest();
     xhr.open('POST', '/v1/chat/completions');
     xhr.setRequestHeader('Content-Type', 'application/json');
 
-    // Server-sent events arrive in pieces; parse whole "data:" lines as they come.
+    // Server-sent events arrive in pieces: handle whole "data:" lines.
     xhr.onprogress = function () {
       pending += xhr.responseText.substring(seen);
       seen = xhr.responseText.length;
@@ -120,38 +168,40 @@
         var chunk;
         try { chunk = JSON.parse(data); } catch (e) { continue; }
         var delta = chunk.choices && chunk.choices[0] && chunk.choices[0].delta;
-        if (delta && delta.reasoning_content) {
-          if (!think) { think = document.createElement('div'); think.className = 'think'; out.appendChild(think); }
-          reasoning += delta.reasoning_content;
-          think.textContent = reasoning;
-        }
         if (delta && delta.content) {
           answer += delta.content;
-          if (!out.lastChild || out.lastChild.nodeType !== 3) out.appendChild(document.createTextNode(''));
-          out.lastChild.nodeValue = answer;
+          body.nodeValue = answer;
         }
         if (chunk.timings) {
-          var meta = document.createElement('div');
+          var meta = document.createElement('span');
           meta.className = 'meta';
           meta.textContent = chunk.timings.predicted_n + ' tokens, ' +
-            chunk.timings.predicted_per_second.toFixed(1) + ' tok/s, ' +
-            ((Date.now() - started) / 1000).toFixed(1) + ' s';
+            chunk.timings.predicted_per_second.toFixed(1) + ' tokens a second';
           out.appendChild(meta);
         }
-        log.scrollTop = log.scrollHeight;
+        bottom();
       }
     };
 
     xhr.onloadend = function () {
       xhr.onprogress();
-      if (xhr.status && xhr.status !== 200 && !answer) out.textContent = 'Error ' + xhr.status + ': ' + xhr.responseText;
-      if (answer) messages.push({ role: 'assistant', content: answer });
+      if (caret.parentNode) caret.parentNode.removeChild(caret);
+      if (!answer) {
+        var err = document.createElement('span');
+        err.className = 'error';
+        err.textContent = xhr.status === 0 ? 'Stopped.' :
+          'No answer (' + xhr.status + '). Check that a model is running in the library.';
+        out.appendChild(err);
+      } else {
+        messages.push({ role: 'assistant', content: answer });
+      }
       xhr = null;
       busy(false);
+      bottom();
       input.focus();
     };
 
-    // Small models on four CPU cores: short answers, no thinking phase.
+    // Small models on a few CPU cores: short answers, no thinking phase.
     xhr.send(JSON.stringify({
       messages: [{ role: 'system', content: SYSTEM }].concat(messages),
       stream: true,
@@ -170,8 +220,10 @@
     ask(text);
   };
 
-  bubble('bot', 'Hi! I am a language model running on this PlayStation 5, on its own CPU. Ask me anything.');
-  input.focus();
+  var ideas = document.querySelectorAll('.idea');
+  for (var k = 0; k < ideas.length; k++) {
+    ideas[k].onclick = function () { if (!xhr) ask(this.textContent); };
+  }
 })();
 </script>
 </body>

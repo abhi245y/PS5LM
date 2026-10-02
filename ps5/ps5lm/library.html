@@ -6,52 +6,76 @@
 <title>PS5LM</title>
 <!--
   The model library ps5lm.elf serves on port 8082 and opens in the PS5
-  browser. Plain ES5 and XMLHttpRequest, no external files: the PS5 browser
-  renders modern bundles blank. Sized for a TV, works on a phone too.
+  browser. cobanov.dev's palette; a plain list with hairline rules, the
+  running model on top. Plain ES5 and XMLHttpRequest with no external files.
   SPDX-License-Identifier: GPL-3.0-or-later
 -->
 <style>
-  :root { --bg: #0e0e14; --panel: #17171f; --line: rgba(235,235,245,0.12); --ink: #f2f2f7;
-    --soft: rgba(235,235,245,0.78); --muted: rgba(235,235,245,0.55); --accent: #8288f0; --ok: #7fd1a8; --bad: #f08a8a; }
-  html, body { margin: 0; background: var(--bg); color: var(--ink);
-    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
-  header { display: flex; align-items: baseline; gap: 18px; padding: 20px 40px; border-bottom: 1px solid var(--line); }
-  header b { font-family: Menlo, Consolas, monospace; font-size: 26px; letter-spacing: -0.04em; }
-  header span { color: var(--muted); font-size: 18px; }
-  main { max-width: 1100px; margin: 0 auto; padding: 24px 40px 60px; }
-  h2 { font-family: Menlo, Consolas, monospace; font-size: 22px; letter-spacing: -0.03em; margin: 28px 0 14px; }
-  .chat { display: flex; align-items: center; gap: 18px; padding: 18px 22px; border: 1px solid var(--line);
-    border-left: 3px solid var(--accent); background: var(--panel); border-radius: 6px; font-size: 22px; }
-  .chat .what { flex: 1; color: var(--soft); }
-  .row { display: flex; align-items: center; gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--line); }
-  .row .info { flex: 1; }
-  .row .name { font-size: 24px; font-weight: 600; }
-  .row .note { color: var(--muted); font-size: 18px; margin-top: 4px; }
-  .row .size { color: var(--muted); font-size: 18px; width: 110px; text-align: right; }
-  .bar { height: 8px; background: var(--line); border-radius: 4px; margin-top: 10px; overflow: hidden; }
-  .bar i { display: block; height: 100%; background: var(--accent); width: 0; }
-  .status { color: var(--muted); font-size: 17px; margin-top: 6px; }
-  .status.bad { color: var(--bad); }
-  button, a.btn { font-size: 20px; padding: 12px 22px; border-radius: 6px; border: 1px solid rgba(235,235,245,0.22);
-    background: #16161d; color: var(--ink); text-decoration: none; cursor: pointer; font-family: inherit; }
-  button.primary, a.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button:focus, a.btn:focus { outline: 3px solid var(--accent); outline-offset: 2px; }
-  .ok { color: var(--ok); }
-  p.foot { color: var(--muted); font-size: 16px; margin-top: 28px; }
+  :root {
+    --bg: #000000; --surface: #0b0b0b; --raised: #0f0f0f; --field: #0d0b0b;
+    --border: #2b2523; --text: #fafafa; --body: #ebebeb; --muted: #aaa39f; --faint: #8f8f8f;
+    --accent: #6e81e4; --fill: #0e1e6a; --fill-hover: #152886; --warn: #e5a29a;
+  }
+  html { font-size: clamp(16px, 1.15vw, 23px); -webkit-text-size-adjust: 100%; }
+  html, body { margin: 0; background: var(--bg); color: var(--body);
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; }
+  a { color: var(--accent); text-decoration: none; }
+  :focus-visible, button:focus, a:focus { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  .top { display: flex; align-items: center; gap: 1rem; height: 3.5rem; padding: 0 1.5rem;
+    border-bottom: 1px solid var(--border); }
+  .brand { color: var(--text); font-weight: 600; letter-spacing: -0.02em; flex: 1; }
+  .top a { font-size: 0.875rem; padding: 0.5rem 0; }
+
+  main { max-width: 46rem; margin: 0 auto; padding: 2.5rem 1.5rem 3rem; }
+  h1 { color: var(--text); font-size: 1.875rem; font-weight: 400; letter-spacing: -0.02em; margin: 0 0 1.5rem; }
+  h2 { color: var(--muted); font-size: 0.875rem; font-weight: 500; margin: 2.5rem 0 0.25rem; }
+
+  .now { display: flex; align-items: center; gap: 0.75rem; padding: 1rem 1.1rem; margin-bottom: 1.5rem;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  .now .what { flex: 1; color: var(--muted); }
+  .now .what b { color: var(--text); font-weight: 500; }
+  .now .what.problem { color: var(--warn); }
+
+  .list { border-top: 1px solid var(--border); }
+  .row { display: flex; align-items: center; gap: 1rem; padding: 1.1rem 0; border-bottom: 1px solid var(--border); }
+  .info { flex: 1; min-width: 0; }
+  .name { color: var(--text); font-weight: 500; }
+  .note { color: var(--muted); font-size: 0.875rem; }
+  .size { color: var(--faint); font-size: 0.875rem; white-space: nowrap; }
+  .progress { height: 3px; background: var(--border); border-radius: 2px; margin: 0.6rem 0 0.35rem; overflow: hidden; }
+  .progress i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.6s linear; }
+  .status { color: var(--faint); font-size: 0.8125rem; }
+  .status.problem { color: var(--warn); }
+  .tag { color: var(--accent); font-size: 0.875rem; white-space: nowrap; }
+
+  .actions { display: flex; align-items: center; gap: 0.5rem; }
+  button, a.button { font: inherit; font-size: 0.875rem; font-weight: 500; line-height: 1; white-space: nowrap;
+    border-radius: 8px; padding: 0.7rem 1.1rem; cursor: pointer; display: inline-block; }
+  .primary { color: #fff; background: var(--fill); border: 1px solid var(--fill); }
+  .primary:hover { background: var(--fill-hover); border-color: var(--fill-hover); }
+  .ghost { color: var(--muted); background: var(--field); border: 1px solid var(--border); }
+  .ghost:hover { color: var(--text); background: #171514; }
+
+  footer { color: var(--faint); font-size: 0.8125rem; margin-top: 2.5rem; }
+  @media (max-width: 560px) {
+    .row { flex-wrap: wrap; }
+    .info { flex-basis: 100%; }
+  }
 </style>
 </head>
 <body>
-<header><b>ps5lm</b><span>models on your PlayStation 5</span></header>
+<header class="top">
+  <span class="brand">ps5lm</span>
+  <a id="chat-link" href="#" style="display:none">Chat</a>
+</header>
 <main>
-  <div class="chat" id="chat"><span class="what">Starting...</span></div>
-
-  <h2>Models</h2>
-  <div id="catalog"></div>
-
-  <h2 id="other-title" style="display:none">Other models on the console</h2>
-  <div id="other"></div>
-
-  <p class="foot" id="foot"></p>
+  <h1>Models</h1>
+  <div class="now" id="now"><span class="what">Loading</span></div>
+  <div class="list" id="catalog"></div>
+  <h2 id="other-title" style="display:none">Copied to the console</h2>
+  <div class="list" id="other"></div>
+  <footer id="foot"></footer>
 </main>
 <script>
 (function () {
@@ -64,8 +88,14 @@
     if (text !== undefined) e.textContent = text;
     return e;
   }
-  function gb(bytes) { return (bytes / 1073741824).toFixed(bytes < 1073741824 ? 2 : 1) + ' GB'; }
-  function mb(bytes) { return (bytes / 1048576).toFixed(1) + ' MB/s'; }
+  function size(bytes) {
+    var gb = bytes / 1073741824;
+    return gb >= 1 ? gb.toFixed(1) + ' GB' : Math.round(bytes / 1048576) + ' MB';
+  }
+  // Qwen3.5-2B-Q4_K_M.gguf reads as Qwen3.5 2B.
+  function short(file) {
+    return file.replace(/\.gguf$/, '').replace(/-(UD-)?(I?Q[0-9].*|BF16|F16|F32)$/i, '').replace(/-/g, ' ');
+  }
 
   function post(path) {
     var x = new XMLHttpRequest();
@@ -73,80 +103,100 @@
     x.onloadend = refresh;
     x.send();
   }
-  function button(label, cls, path) {
-    var b = el('button', cls, label);
+  function button(label, kind, path) {
+    var b = el('button', kind, label);
+    b.type = 'button';
     b.onclick = function () { post(path); };
     return b;
   }
 
-  function renderChat(chat) {
-    var box = document.getElementById('chat');
+  function chatUrl() { return 'http://' + host + ':' + state.chat.port + '/'; }
+
+  function renderNow() {
+    var box = document.getElementById('now');
+    var chat = state.chat;
+    var link = document.getElementById('chat-link');
     box.innerHTML = '';
-    var url = 'http://' + host + ':' + chat.port + '/';
+    var what = el('span', 'what');
     if (chat.model && chat.ready) {
-      box.appendChild(el('span', 'what', 'Running ' + chat.model));
-      var a = el('a', 'btn primary', 'Open chat');
-      a.href = url;
-      box.appendChild(a);
-      box.appendChild(button('Stop', '', '/api/stop'));
+      what.appendChild(document.createTextNode('Running '));
+      what.appendChild(el('b', '', short(chat.model)));
+      box.appendChild(what);
+      var open = el('a', 'button primary', 'Open chat');
+      open.href = chatUrl();
+      box.appendChild(open);
+      box.appendChild(button('Stop', 'ghost', '/api/stop'));
+      link.href = chatUrl();
+      link.style.display = '';
     } else if (chat.model) {
-      box.appendChild(el('span', 'what', 'Loading ' + chat.model + '...'));
-    } else if (chat.error) {
-      box.appendChild(el('span', 'what', chat.error));
+      what.appendChild(document.createTextNode('Starting '));
+      what.appendChild(el('b', '', short(chat.model)));
+      box.appendChild(what);
+      link.style.display = 'none';
     } else {
-      box.appendChild(el('span', 'what', 'Download a model below, then run it.'));
+      if (chat.error) {
+        what.className = 'what problem';
+        what.textContent = chat.error;
+      } else {
+        what.textContent = 'Nothing running. Download a model, then run it.';
+      }
+      box.appendChild(what);
+      link.style.display = 'none';
     }
   }
 
-  function renderModel(m, chat) {
-    var row = el('div', 'row');
+  function row(m) {
+    var r = el('div', 'row');
     var info = el('div', 'info');
     info.appendChild(el('div', 'name', m.name));
-    info.appendChild(el('div', 'note', m.note));
+    if (m.note) info.appendChild(el('div', 'note', m.note));
     var d = m.download;
-    if (d && d.active) {
-      var bar = el('div', 'bar');
+    var downloading = d && d.active;
+    if (downloading) {
+      var bar = el('div', 'progress');
       var fill = el('i');
       fill.style.width = (d.total ? Math.floor(100 * d.done / d.total) : 0) + '%';
       bar.appendChild(fill);
       info.appendChild(bar);
-      info.appendChild(el('div', 'status', gb(d.done) + ' of ' + gb(d.total) + (d.speed ? ', ' + mb(d.speed) : '')));
+      info.appendChild(el('div', 'status', size(d.done) + ' of ' + size(d.total) +
+        (d.speed ? ', ' + (d.speed / 1048576).toFixed(1) + ' MB/s' : '')));
     } else if (d && d.error && !m.installed) {
-      info.appendChild(el('div', 'status' + (d.error === 'paused' ? '' : ' bad'),
-        d.error === 'paused' ? 'Paused at ' + gb(d.done) : d.error));
+      var paused = d.error === 'paused' || d.error === 'cancelled';
+      info.appendChild(el('div', paused ? 'status' : 'status problem',
+        paused ? 'Paused at ' + size(d.done) : d.error));
     }
-    row.appendChild(info);
-    row.appendChild(el('div', 'size', gb(m.size)));
+    r.appendChild(info);
+    r.appendChild(el('span', 'size', size(m.size)));
 
-    if (d && d.active) {
-      row.appendChild(button('Cancel', '', '/api/cancel?id=' + encodeURIComponent(m.id)));
-    } else if (m.installed && state.max_model && m.size > state.max_model) {
-      row.appendChild(el('span', 'status bad', 'Too big for a payload'));
-      row.appendChild(button('Delete', '', '/api/delete?file=' + encodeURIComponent(m.file)));
+    var actions = el('div', 'actions');
+    var tooBig = state.max_model && m.size > state.max_model;
+    if (downloading) {
+      actions.appendChild(button('Cancel', 'ghost', '/api/cancel?id=' + encodeURIComponent(m.id)));
+    } else if (m.installed && state.chat.model === m.file) {
+      actions.appendChild(el('span', 'tag', state.chat.ready ? 'Running' : 'Starting'));
+    } else if (m.installed && tooBig) {
+      actions.appendChild(el('span', 'status problem', 'Too big to run'));
+      actions.appendChild(button('Delete', 'ghost', '/api/delete?file=' + encodeURIComponent(m.file)));
     } else if (m.installed) {
-      if (chat.model === m.file) {
-        row.appendChild(el('span', 'ok', chat.ready ? 'Running' : 'Loading'));
-      } else {
-        row.appendChild(button('Run', 'primary', '/api/run?file=' + encodeURIComponent(m.file)));
-        row.appendChild(button('Delete', '', '/api/delete?file=' + encodeURIComponent(m.file)));
-      }
+      actions.appendChild(button('Run', 'primary', '/api/run?file=' + encodeURIComponent(m.file)));
+      actions.appendChild(button('Delete', 'ghost', '/api/delete?file=' + encodeURIComponent(m.file)));
     } else {
-      row.appendChild(button(d && d.done ? 'Resume' : 'Download', 'primary',
+      actions.appendChild(button(d && d.done ? 'Resume' : 'Download', 'primary',
         '/api/download?id=' + encodeURIComponent(m.id)));
     }
-    return row;
+    r.appendChild(actions);
+    return r;
   }
 
   function render() {
-    renderChat(state.chat);
+    renderNow();
     var list = document.getElementById('catalog');
     list.innerHTML = '';
     var known = {};
     for (var i = 0; i < state.catalog.length; i++) {
       known[state.catalog[i].file] = true;
-      list.appendChild(renderModel(state.catalog[i], state.chat));
+      list.appendChild(row(state.catalog[i]));
     }
-    // Models copied over FTP or USB that are not in the catalog.
     var other = document.getElementById('other');
     other.innerHTML = '';
     var count = 0;
@@ -154,13 +204,13 @@
       var f = state.installed[j];
       if (known[f.file]) continue;
       count++;
-      other.appendChild(renderModel({ id: '', name: f.file, note: 'Copied to /data/PS5LM/models',
-        file: f.file, size: f.size, installed: true }, state.chat));
+      other.appendChild(row({ id: '', name: short(f.file), note: '', file: f.file, size: f.size, installed: true }));
     }
     document.getElementById('other-title').style.display = count ? '' : 'none';
-    document.getElementById('foot').textContent = 'PS5LM ' + state.version + '. ' +
-      (state.free >= 0 ? gb(state.free) + ' free on the console. ' : '') +
-      (state.ip ? 'From a phone or computer on the same network: http://' + state.ip + ':' + state.port + '/' : '');
+    var foot = 'PS5LM ' + state.version + '.';
+    if (state.free >= 0) foot += ' ' + size(state.free) + ' free.';
+    if (state.ip) foot += ' On a phone or computer: http://' + state.ip + ':' + state.port;
+    document.getElementById('foot').textContent = foot;
   }
 
   function refresh() {

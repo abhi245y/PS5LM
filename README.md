@@ -16,9 +16,15 @@ The first target is **Qwen 3.8** (27B, hybrid Gated DeltaNet attention), the new
 
 You need a PS5 you own on firmware 7.00 to 13.60, jailbroken, with a payload loader (Payload Manager from WebKit Autoloader, or elfldr on port 9021).
 
-1. Download `ps5lm.elf` from the [latest release](https://github.com/cobanov/PS5LM/releases/latest).
-2. Load it like any payload: in Payload Manager, add it under *Manage payloads* and start it; or send it to an ELF loader on port 9021.
-3. The PS5's browser opens the PS5LM library. Press **Download** on a model, then **Run**, then **Open chat**. Type with the DualSense.
+**From Payload Manager**, which also brings updates:
+
+1. *Settings*: turn on **Multiple Payload Sources**.
+2. Add the source `https://ps5lm.cobanov.dev/payloads.json`.
+3. Install **PS5LM** from the list and load it.
+
+**Or by hand**: download `ps5lm.elf` from the [latest release](https://github.com/cobanov/PS5LM/releases/latest) and load it like any payload (upload it in Payload Manager, or send it to an ELF loader on port 9021).
+
+Once it runs, the PS5's browser opens the PS5LM library. Press **Download** on a model, then **Run**, then **Open chat**. Type with the DualSense.
 
 The library also works from a phone or computer on the same network at `http://<console IP>:8082`, and the chat at port 8081 speaks the OpenAI API. Models are stored in `/data/PS5LM/models`; a GGUF copied there over FTP shows up too.
 

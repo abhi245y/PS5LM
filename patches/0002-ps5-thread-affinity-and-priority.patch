@@ -1,0 +1,99 @@
+diff --git a/ggml/src/ggml-cpu/ggml-cpu.c b/ggml/src/ggml-cpu/ggml-cpu.c
+index 8620c6c..dd1bbed 100644
+--- a/ggml/src/ggml-cpu/ggml-cpu.c
++++ b/ggml/src/ggml-cpu/ggml-cpu.c
+@@ -2695,6 +2695,51 @@ static bool ggml_thread_apply_priority(int32_t prio) {
+     return true;
+ }
+ 
++#elif defined(__PROSPERO__)
++
++// PS5: Sony's thread calls stand in for the Linux ones. A payload may only run
++// on the CPUs in its affinity mask (0xea00 on firmware 13.60), shared with the
++// console's own services, so a mask outside it fails and priority is only ever
++// lowered. Sony priorities run 256 (first) to 767 (last); threads start at 700.
++int scePthreadSetaffinity(pthread_t thread, uint64_t mask);
++int scePthreadSetprio(pthread_t thread, int prio);
++
++static bool ggml_thread_apply_affinity(const bool * mask) {
++    uint64_t bits = 0;
++    for (int i = 0; i < 64 && i < GGML_MAX_N_THREADS; i++) {
++        if (mask[i]) {
++            bits |= 1ull << i;
++        }
++    }
++
++    const int err = scePthreadSetaffinity(pthread_self(), bits);
++    if (err != 0) {
++        fprintf(stderr, "warn: failed to set affinity mask 0x%llx : 0x%08x\n", (unsigned long long) bits, (unsigned) err);
++        return false;
++    }
++
++    return true;
++}
++
++static bool ggml_thread_apply_priority(int32_t prio) {
++    if (prio == GGML_SCHED_PRIO_NORMAL) {
++        return true;
++    }
++    if (prio != GGML_SCHED_PRIO_LOW) {
++        // Spinning workers above the system's own threads starve them.
++        fprintf(stderr, "warn: thread priority %d is not raised on the PS5\n", prio);
++        return false;
++    }
++
++    const int err = scePthreadSetprio(pthread_self(), 720);
++    if (err != 0) {
++        fprintf(stderr, "warn: failed to lower thread priority : 0x%08x\n", (unsigned) err);
++        return false;
++    }
++
++    return true;
++}
++
+ #else // unsupported platforms
+ 
+ static bool ggml_thread_apply_affinity(const bool * mask) {
+@@ -3296,9 +3341,11 @@ static void ggml_graph_compute_kickoff(struct ggml_threadpool * threadpool, int
+     if (threadpool->pause) {
+        // Update main thread prio and affinity to match the threadpool settings
+        ggml_thread_apply_priority(threadpool->prio);
++#if !defined(__PROSPERO__) // PS5: see ggml_threadpool_new_impl
+        if (ggml_thread_cpumask_is_valid(threadpool->workers[0].cpumask)) {
+            ggml_thread_apply_affinity(threadpool->workers[0].cpumask);
+        }
++#endif
+ 
+        // resume does cond broadcast
+        ggml_threadpool_resume_locked(threadpool);
+@@ -3375,9 +3422,14 @@ static struct ggml_threadpool * ggml_threadpool_new_impl(
+     if (!threadpool->pause) {
+         // Update main thread prio and affinity at the start, otherwise we'll do it in resume
+         ggml_thread_apply_priority(threadpool->prio);
++#if !defined(__PROSPERO__)
++        // PS5: the calling thread keeps the whole mask. Threads it starts later
++        // inherit its affinity, so pinning it to one CPU would pin them too
++        // (PS5SX2 hit this with a ticker thread, commit f9abb4a).
+         if (ggml_thread_cpumask_is_valid(threadpool->workers[0].cpumask)) {
+             ggml_thread_apply_affinity(threadpool->workers[0].cpumask);
+         }
++#endif
+     }
+ #endif // GGML_USE_OPENMP
+ 
+diff --git a/common/common.cpp b/common/common.cpp
+index 7e89648..f0693fe 100644
+--- a/common/common.cpp
++++ b/common/common.cpp
+@@ -275,6 +275,11 @@ bool set_process_priority(enum ggml_sched_priority prio) {
+     if (prio == GGML_SCHED_PRIO_NORMAL) {
+         return true;
+     }
++#if defined(__PROSPERO__)
++    // PS5: what setpriority does to a payload is unknown. ggml lowers its own
++    // threads' Sony priority for --prio -1 and refuses to raise them.
++    return prio == GGML_SCHED_PRIO_LOW;
++#endif
+ 
+     int p = 0;
+     switch (prio) {

@@ -65,9 +65,9 @@ An Ollama-like way to get models and chat, without a PC in the loop. One payload
 
 ## Phase 2: fit and speed on the CPU
 
-- [ ] Weights in direct memory if malloc's ceiling is too low: a ggml CPU buffer type on `sceKernelAllocateDirectMemory`, as a patch in `patches/`
+- [ ] Weights in direct memory if malloc's ceiling is too low: a ggml CPU buffer type on `sceKernelAllocateDirectMemory`, as a patch in `patches/`. Needs the native app: a payload's budget has no direct memory ([CONSOLE.md](CONSOLE.md)); the recipe is in [RESEARCH.md](RESEARCH.md)
 - [ ] Loading: mmap or `--no-mmap`, from `/data` or a USB drive, whichever Phase 0 shows is faster
-- [ ] Threads: the best `-t` for the cores a payload is allowed, with pinning
+- [ ] Threads: the best `-t` for the cores a payload is allowed, with pinning (`patches/0002` makes `-C` and `--prio` work, #7)
 - [ ] Qwen 3.8's native MTP block for speculative decoding
 - [ ] Context budget: 8k to 32k tokens
 
@@ -75,13 +75,14 @@ An Ollama-like way to get models and chat, without a PC in the loop. One payload
 
 ## Phase 3: the GPU through Vulkan
 
-The route: ggml's Vulkan backend on [Mihawk-99's PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan), a RADV based driver that programs the PS5's GPU (AGC) directly and passes the Vulkan CTS. llama.cpp keeps its own kernels, so every model and quant comes along.
+The route: ggml's Vulkan backend on [Mihawk-99's PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan), whose RADV driver (Mesa 26.2 from [PS5_Mesa](https://github.com/mihawk-99/PS5_Mesa), on a PS5 winsys over the console's AGC functions) reports Vulkan 1.4 and compiles shaders with ACO on the console. llama.cpp keeps its own kernels, so every model and quant comes along. RADV has everything ggml-vulkan requires but no cooperative matrix and no accelerated integer dot product, so matrix products take the fp16 shaders ([RESEARCH.md](RESEARCH.md)).
 
-- [ ] Build the driver on Linux (an OrbStack Ubuntu machine is enough)
-- [ ] App shell: `eboot.bin` with `sce_sys/param.json`, from [ps5-native-app-boilerplate](https://github.com/blackbearreloaded/ps5-native-app-boilerplate), mounted by ShadowMountPlus, jailbroken at start through the HEN request PS5SX2 uses
-- [ ] ggml-vulkan cross-compiled, its shaders compiled to SPIR-V on the host
+- [ ] Build RADV: `tools/setup-native-dependencies.sh`, then `tools/build-radv.sh release` in PS5_Vulkan (CachyOS or Arch is the tested host; an Arch machine in OrbStack avoids an untested Ubuntu). Output: `libvulkan_radeon.ps5.a`
+- [ ] App shell: `eboot.bin` with `sce_sys/param.json`, from [ps5-native-app-boilerplate](https://github.com/blackbearreloaded/ps5-native-app-boilerplate), mounted by ShadowMountPlus, jailbroken at start through the HEN request PS5SX2 uses (the title ID must be on etaHEN's allowlist)
+- [ ] ggml-vulkan cross-compiled, its shaders compiled to SPIR-V on the host, linked as `tools/radv-link.sh` does (`--whole-archive`, `--defsym` for the `vk*` entry points ggml calls directly)
 - [ ] `test-backend-ops` on the console: every op the `qwen35` graph uses matches the CPU
-- [ ] Weights in device memory (the driver's 12 GiB heap, `PS5VK_WIDE_MEMORY`)
+- [ ] Prompt processing in small batches: a submit that makes no progress for 10 s loses the device, and Gated DeltaNet loops over every token of a batch in one dispatch
+- [ ] Weights in device memory. RADV's heaps come out of one direct memory pool of about 12 GiB, shared with the CPU side, so UD-IQ2_XXS (6.77 GiB) before UD-Q2_K_XL
 - [ ] Qwen3.8-27B decoding on the GPU, target 15 tok/s or more
 
 **Done when** the GPU decodes at least five times faster than the CPU.

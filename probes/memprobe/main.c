@@ -1,10 +1,11 @@
 /* PS5LM memprobe: the Phase 0 probe.
  *
  * Measures what a payload process on a jailbroken PS5 can use for LLM
- * inference: the console and CPU, the direct, flexible and malloc memory
- * ceilings, the largest single allocation (llama.cpp's CPU backend puts all
- * weights in one), memory bandwidth on malloc and on direct memory, AVX2 FMA
- * throughput, and storage read and mmap speed on a GGUF file if one is present.
+ * inference: the console and CPU, the locked memory limits, the main direct,
+ * direct, flexible and malloc memory ceilings, the largest single allocation
+ * (llama.cpp's CPU backend puts all weights in one), memory bandwidth on
+ * malloc and on direct memory, AVX2 FMA throughput, and storage read and mmap
+ * speed on a GGUF file if one is present.
  *
  * Every line goes to stdout (elfldr streams it back to scripts/send.sh) and to
  * /data/PS5LM/memprobe.txt, synced line by line, so a probe the system kills
@@ -27,7 +28,9 @@
 #include <sys/cpuset.h>
 #include <sys/mman.h>
 #include <sys/mount.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/sysctl.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -49,6 +52,8 @@ int    sceKernelAllocateDirectMemory(off_t search_start, off_t search_end, size_
                                      size_t alignment, int memory_type, off_t *phys_out);
 int    sceKernelMapDirectMemory(void **addr, size_t len, int prot, int flags,
                                 off_t direct_start, size_t alignment);
+int    sceKernelAllocateMainDirectMemory(size_t len, size_t alignment, int memory_type,
+                                         off_t *phys_out);
 int    sceKernelReleaseDirectMemory(off_t start, size_t len);
 int    sceKernelMunmap(void *addr, size_t len);
 size_t sceKernelGetDirectMemorySize(void);
@@ -176,6 +181,70 @@ static void probe_pools(void) {
     out("flexible cfg  %.2f GiB (rc=0x%x)\n", gib(flex_cfg), rc);
     rc = sceKernelAvailableFlexibleMemorySize(&flex_avail);
     out("flexible free %.2f GiB (rc=0x%x)\n", gib(flex_avail), rc);
+}
+
+/* What bounds locked memory (issue #10): the process's RLIMIT_MEMLOCK and the
+ * kernel's wired page counters, where the PS5 keeps FreeBSD's names. */
+static void probe_wired(void) {
+    static const char *const names[] = {
+        "vm.max_wired", "vm.stats.vm.v_wire_count", "vm.stats.vm.v_free_count",
+        "vm.stats.vm.v_page_count", "hw.pagesize",
+    };
+    struct rlimit rl;
+
+    out("== locked memory\n");
+    if (getrlimit(RLIMIT_MEMLOCK, &rl) == 0)
+        out("memlock limit cur=%lld max=%lld\n", (long long)rl.rlim_cur, (long long)rl.rlim_max);
+    else
+        out("memlock limit unavailable (errno %d)\n", errno);
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        unsigned long long v = 0; /* int or long, little endian either way */
+        size_t len = sizeof(v);
+        if (sysctlbyname(names[i], &v, &len, NULL, 0) == 0)
+            out("%-26s %llu\n", names[i], len == 4 ? (unsigned long long)(uint32_t)v : v);
+        else
+            out("%-26s unavailable (errno %d)\n", names[i], errno);
+    }
+}
+
+/* The pool ps5-payload-dev's SDL takes its 64 MiB of video buffers from inside
+ * a payload (src/video/ps5/SDL_ps5video.c): AllocateMainDirectMemory, type 3,
+ * 128 KiB aligned, mapped for CPU and GPU (0x33). Climbs in MAIN_STEP steps to
+ * MAIN_MAX, well under the 1.4 GB that locked safely, and gives it all back.
+ * Tells whether a payload can hold memory that is never paged out without
+ * mlock (issue #10). */
+#define MAIN_STEP       (64 * MiB)
+#define MAIN_MAX        (512 * MiB)
+#define MAIN_ALIGN      (128 * 1024)
+#define PROT_CPU_GPU_RW 0x33
+
+static void probe_main_direct(void) {
+    static off_t phys[MAIN_MAX / MAIN_STEP];
+    static void *addr[MAIN_MAX / MAIN_STEP];
+    int n = 0;
+
+    out("== main direct memory (%llu MiB steps, up to %llu MiB)\n", MAIN_STEP / MiB, MAIN_MAX / MiB);
+    for (; n < (int)(MAIN_MAX / MAIN_STEP); n++) {
+        int rc = sceKernelAllocateMainDirectMemory(MAIN_STEP, MAIN_ALIGN, 3, &phys[n]);
+        if (rc != 0) {
+            out("  stop at %llu MiB: allocate rc=0x%x\n", (unsigned long long)n * MAIN_STEP / MiB, rc);
+            break;
+        }
+        addr[n] = NULL;
+        rc = sceKernelMapDirectMemory(&addr[n], MAIN_STEP, PROT_CPU_GPU_RW, 0, phys[n], MAIN_ALIGN);
+        if (rc != 0) {
+            out("  stop at %llu MiB: map rc=0x%x\n", (unsigned long long)n * MAIN_STEP / MiB, rc);
+            sceKernelReleaseDirectMemory(phys[n], MAIN_STEP);
+            break;
+        }
+        touch(addr[n], MAIN_STEP);
+    }
+    out("main direct   %llu MiB mapped and touched\n", (unsigned long long)n * MAIN_STEP / MiB);
+
+    for (int i = 0; i < n; i++) {
+        sceKernelMunmap(addr[i], MAIN_STEP);
+        sceKernelReleaseDirectMemory(phys[i], MAIN_STEP);
+    }
 }
 
 /* Allocates and maps direct memory in CHUNK steps until the kernel says no. */
@@ -490,6 +559,8 @@ int main(void) {
     int ncpu = 1;
     probe_system(&ncpu);
     probe_pools();
+    probe_wired();
+    probe_main_direct();
     probe_direct();
     probe_malloc();
     probe_bandwidth(ncpu);

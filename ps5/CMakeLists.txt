@@ -12,6 +12,15 @@ set(LLAMA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/llama.cpp")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 add_subdirectory(${LLAMA_DIR} llama.cpp)
 
+# The tools leave through _Exit when main returns, skipping Sony's exit() and
+# the static destructors it runs (compat/exit.cpp, issue #3).
+foreach(tool llama-cli llama-server llama-bench llama-completion)
+    if(TARGET ${tool})
+        target_sources(${tool} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/compat/exit.cpp")
+        target_link_options(${tool} PRIVATE "LINKER:--wrap=main")
+    endif()
+endforeach()
+
 # Files the payload carries inside itself (the pages and the CA bundle), as
 # byte arrays in a generated header. Reconfigures when one of them changes.
 function(ps5lm_embed out_header)

@@ -26,6 +26,12 @@ fi
 [ "$actual" = "$SHA256" ] || { echo "build-mbedtls: checksum mismatch" >&2; exit 1; }
 [ -d "$src" ] || tar xjf "$tarball" -C "$deps"
 
+# ps5lm downloads over 16 connections at once, and TLS 1.3 handshakes share
+# PSA's global key store, which is only thread-safe with these two (mbedTLS
+# docs/architecture/psa-thread-safety; pacbrew's PS5 package turns them on too).
+python3 "$src/scripts/config.py" -f "$src/include/mbedtls/mbedtls_config.h" set MBEDTLS_THREADING_C
+python3 "$src/scripts/config.py" -f "$src/include/mbedtls/mbedtls_config.h" set MBEDTLS_THREADING_PTHREAD
+
 "$PS5_PAYLOAD_SDK/bin/prospero-cmake" -S "$src" -B "$deps/mbedtls-build" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="$out" \

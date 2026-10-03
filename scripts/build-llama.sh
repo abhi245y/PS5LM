@@ -18,9 +18,8 @@ if [ ! -f "$llama/CMakeLists.txt" ]; then
     echo "build-llama: run git submodule update --init first" >&2
     exit 1
 fi
-if [ ! -f "$mbedtls/lib/libmbedtls.a" ]; then
-    "$root/scripts/build-mbedtls.sh"
-fi
+# Incremental: rebuilds mbedTLS only when its version or configuration changed.
+"$root/scripts/build-mbedtls.sh"
 
 # The PS5 changes to llama.cpp live in patches/ and go onto the submodule's
 # working tree; a patch that is already applied is skipped.

@@ -17,12 +17,15 @@
     --border: #2b2523; --text: #fafafa; --body: #ebebeb; --muted: #b5aea9; --faint: #9a9a9a;
     --accent: #6e81e4; --button: #fafafa; --quiet: #141414; --warn: #e5a29a;
   }
-  html { font-size: clamp(17px, 1.3vw, 26px); -webkit-text-size-adjust: 100%; }
+  html { font-size: 20px; font-size: clamp(17px, 1.3vw, 26px); -webkit-text-size-adjust: 100%; }
   html, body { margin: 0; background: var(--bg); color: var(--body);
     font-family: "SST", "SST Roman", "SST-Roman", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; }
   a { color: var(--accent); text-decoration: none; }
-  /* The PS5's own focus: a white frame around what the cursor is on. */
-  :focus-visible, button:focus, a:focus { outline: 3px solid var(--text); outline-offset: 2px; }
+  /* The PS5's own focus: a white frame around what the cursor is on. Kept
+     apart from :focus-visible, since a browser that does not know it drops
+     the whole rule, frame included. */
+  button:focus, a:focus { outline: 3px solid var(--text); outline-offset: 2px; }
+  :focus-visible { outline: 3px solid var(--text); outline-offset: 2px; }
 
   .top { display: flex; align-items: center; gap: 1rem; height: 3.5rem; padding: 0 1.5rem;
     border-bottom: 1px solid var(--border); }
@@ -70,6 +73,7 @@
 <header class="top">
   <span class="brand">ps5lm</span>
   <a id="chat-link" href="#" style="display:none">Chat</a>
+  <button id="quit" class="ghost" type="button">Quit</button>
 </header>
 <main>
   <h1>Models</h1>
@@ -83,6 +87,10 @@
 (function () {
   var host = location.hostname;
   var state = null;
+  var lastText = '';   // the last state the page was drawn from
+  var busy = false;    // a poll is out
+  var again = false;   // poll again when it is back
+  var misses = 0;      // polls in a row that got no answer
 
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -105,9 +113,11 @@
     x.onloadend = refresh;
     x.send();
   }
+  // Each control carries a key, so focus can go back to it after a redraw.
   function button(label, kind, path) {
     var b = el('button', kind, label);
     b.type = 'button';
+    b.setAttribute('data-k', path);
     b.onclick = function () { post(path); };
     return b;
   }
@@ -126,6 +136,7 @@
       box.appendChild(what);
       var open = el('a', 'button primary', 'Open chat');
       open.href = chatUrl();
+      open.setAttribute('data-k', 'open-chat');
       box.appendChild(open);
       box.appendChild(button('Stop', 'ghost', '/api/stop'));
       link.href = chatUrl();
@@ -190,7 +201,24 @@
     return r;
   }
 
+  // The lists are rebuilt on every change, which drops the element the
+  // controller was on; put focus back on the control with the same key.
   function render() {
+    var active = document.activeElement;
+    var key = active && active.getAttribute ? active.getAttribute('data-k') : null;
+    draw();
+    if (!key) return;
+    var nodes = document.querySelectorAll('[data-k]');
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].getAttribute('data-k') === key) {
+        nodes[i].focus();
+        return;
+      }
+    }
+  }
+
+  function draw() {
+    document.getElementById('quit').style.display = '';
     renderNow();
     var list = document.getElementById('catalog');
     list.innerHTML = '';
@@ -215,14 +243,68 @@
     document.getElementById('foot').textContent = foot;
   }
 
+  // After the payload is gone (Quit, Payload Manager, a reboot), say so
+  // instead of leaving buttons that do nothing.
+  function down() {
+    lastText = '';
+    var box = document.getElementById('now');
+    box.innerHTML = '';
+    box.appendChild(el('span', 'what problem', 'PS5LM is not running. Start it again from Payload Manager.'));
+    document.getElementById('catalog').innerHTML = '';
+    document.getElementById('other').innerHTML = '';
+    document.getElementById('other-title').style.display = 'none';
+    document.getElementById('chat-link').style.display = 'none';
+    document.getElementById('quit').style.display = 'none';
+    document.getElementById('quit').textContent = 'Quit';
+    document.getElementById('foot').textContent = '';
+  }
+
+  // One poll at a time; the page is redrawn only when the state changed.
   function refresh() {
+    if (busy) {
+      again = true;
+      return;
+    }
+    busy = true;
     var x = new XMLHttpRequest();
     x.open('GET', '/api/state');
-    x.onload = function () {
-      try { state = JSON.parse(x.responseText); render(); } catch (e) {}
+    x.timeout = 4000;
+    x.onloadend = function () {
+      busy = false;
+      if (x.status !== 200) {
+        if (++misses >= 2) down();
+      } else {
+        misses = 0;
+        if (x.responseText !== lastText) {
+          lastText = x.responseText;
+          try { state = JSON.parse(lastText); render(); } catch (e) {}
+        }
+      }
+      if (again) {
+        again = false;
+        refresh();
+      }
     };
     x.send();
   }
+
+  // Two presses, so a stray one on the controller does not end a chat.
+  var quit = document.getElementById('quit');
+  var armed = null;
+  quit.onclick = function () {
+    if (armed) {
+      clearTimeout(armed);
+      armed = null;
+      quit.textContent = 'Quitting';
+      post('/api/quit');
+      return;
+    }
+    quit.textContent = 'Press again to quit';
+    armed = setTimeout(function () {
+      armed = null;
+      quit.textContent = 'Quit';
+    }, 4000);
+  };
 
   refresh();
   setInterval(refresh, 1500);

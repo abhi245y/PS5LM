@@ -20,13 +20,16 @@
     --border: #2b2523; --text: #fafafa; --body: #ebebeb; --muted: #b5aea9; --faint: #9a9a9a;
     --accent: #6e81e4; --button: #fafafa; --quiet: #141414;
   }
-  html { font-size: clamp(17px, 1.3vw, 26px); -webkit-text-size-adjust: 100%; }
+  html { font-size: 20px; font-size: clamp(17px, 1.3vw, 26px); -webkit-text-size-adjust: 100%; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--body);
     font-family: "SST", "SST Roman", "SST-Roman", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.55; }
   body { display: flex; flex-direction: column; }
   a { color: var(--accent); text-decoration: none; }
-  /* The PS5's own focus: a white frame around what the cursor is on. */
-  :focus-visible, button:focus, input:focus { outline: 3px solid var(--text); outline-offset: 2px; }
+  /* The PS5's own focus: a white frame around what the cursor is on. Kept
+     apart from :focus-visible, since a browser that does not know it drops
+     the whole rule, frame included. */
+  button:focus, input:focus { outline: 3px solid var(--text); outline-offset: 2px; }
+  :focus-visible { outline: 3px solid var(--text); outline-offset: 2px; }
 
   .top { display: flex; align-items: center; gap: 1rem; height: 3.5rem; padding: 0 1.5rem;
     border-bottom: 1px solid var(--border); }

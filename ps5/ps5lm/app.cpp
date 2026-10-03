@@ -5,7 +5,9 @@
 // Mozilla CA list built in) and picks the one to run. The chat server is
 // llama.cpp's own llama-server, started inside this process on port 8081 with
 // the chosen model; switching models stops it with llama_server_terminate()
-// and starts it again. On start, the PS5's browser opens the library.
+// and starts it again. On start, the PS5's browser opens the library. A
+// watchdog rebuilds the servers after rest mode or a network change, when
+// their sockets go stale.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -20,13 +22,17 @@
 #include <sys/mount.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <condition_variable>
+#include <csignal>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <dirent.h>
 #include <functional>
 #include <map>
@@ -47,6 +53,8 @@ typedef struct {
     char message[3075];
 } notify_request_t;
 int sceKernelSendNotificationRequest(int device, notify_request_t * req, size_t size, int blocking);
+int sceShellCoreUtilResetAutoPowerDownTimer(void);
+int sceKernelAvailableFlexibleMemorySize(size_t * size);
 }
 
 using json = nlohmann::json;
@@ -62,6 +70,14 @@ const std::string kLogFile  = kRoot + "/ps5lm.log";
 const int kLibraryPort = 8082;
 const int kChatPort    = 8081;
 const char * kVersion  = "0.1.0";
+
+// Before this, the console's clock is wrong and every certificate looks not
+// yet valid: Payload Manager users hit it as TLS failures (its #23, #45, #54).
+constexpr time_t kReleaseEpoch = 1790812800;  // 2026-10-01
+
+// statfs on /data reports more free space than Settings does (PS5 Game
+// Compressor #43), so a download keeps this much in reserve.
+constexpr long long kSpareBytes = 512LL * 1024 * 1024;
 
 // The model is locked in memory (see run_loop), and locked pages are taken
 // from the same pool the home screen and the browser need. 1.3 GB locked runs
@@ -269,6 +285,9 @@ std::string resolve(const CatalogModel & m, std::string & why) {
         auto res = cli.Get(u.path, headers);
         if (!res) {
             why = "network error: " + httplib::to_string(res.error());
+            if (res.error() == httplib::Error::SSLServerVerification && time(nullptr) < kReleaseEpoch) {
+                why = "the console's date and time are wrong, set them in Settings";
+            }
             return "";
         }
         if (res->status >= 300 && res->status < 400) {
@@ -295,6 +314,11 @@ bool download_cancelled(const CatalogModel & m) {
     std::lock_guard<std::mutex> lock(g_dl_mu);
     return g_downloads[m.id].cancel;
 }
+
+// A failed piece goes back in the queue, and its connection waits 1, 2, 4, 8
+// then 16 s before trying again; it gives up after kMaxStreak failures in a
+// row. A short Wi-Fi drop costs a pause, not the download.
+constexpr int kMaxStreak = 8;
 
 void download(const CatalogModel & m) {
     const std::string final_path  = kModels + "/" + m.file;
@@ -331,7 +355,7 @@ void download(const CatalogModel & m) {
             have += std::min(kPiece, total - (long long) i * kPiece);
         }
     }
-    if (free_bytes(kRoot) >= 0 && free_bytes(kRoot) < total - have + 64LL * 1024 * 1024) {
+    if (free_bytes(kRoot) >= 0 && free_bytes(kRoot) < total - have + kSpareBytes) {
         fail("not enough free space on the console");
         return;
     }
@@ -363,10 +387,10 @@ void download(const CatalogModel & m) {
         return;
     }
 
-    std::mutex              mu;  // guards cdn, next, failures, done
-    int                     next     = 0;
-    int                     failures = 0;
+    std::mutex              mu;  // guards cdn, next, done
+    int                     next = 0;
     std::atomic<long long>  received{have};
+    std::atomic<bool>       disk_full{false};
     std::atomic<int>        running{0};
     std::mutex              finish_mu;
     std::condition_variable finish_cv;
@@ -376,9 +400,24 @@ void download(const CatalogModel & m) {
         d.total = total;
     });
 
+    // The record marks only pieces whose data has reached the disk: it is
+    // written from a copy taken before the fsync, so a crash or a power cut
+    // never leaves a piece marked done that holds zeros. PS5 Game Compressor
+    // syncs before it renames for the same reason.
+    auto save_record = [&] {
+        std::vector<char> copy;
+        {
+            std::lock_guard<std::mutex> lock(mu);
+            copy = done;
+        }
+        fsync(fd);
+        pwrite(pieces_fd, copy.data(), count, 0);
+    };
+
     auto worker = [&] {
         std::string origin;
         std::unique_ptr<httplib::Client> cli;
+        int streak = 0;  // failures in a row on this connection
         for (;;) {
             int         piece = -1;
             std::string url;
@@ -387,12 +426,12 @@ void download(const CatalogModel & m) {
                 while (next < count && done[next] == '1') {
                     next++;
                 }
-                if (next < count && failures < 20) {
+                if (next < count) {
                     piece = next++;
                     url   = cdn;
                 }
             }
-            if (piece < 0 || download_cancelled(m)) {
+            if (piece < 0 || disk_full || download_cancelled(m)) {
                 break;
             }
 
@@ -417,6 +456,9 @@ void download(const CatalogModel & m) {
                 },
                 [&](const char * data, size_t len) {
                     if (pwrite(fd, data, len, start + wrote) != (ssize_t) len) {
+                        if (errno == ENOSPC) {
+                            disk_full = true;
+                        }
                         return false;
                     }
                     wrote += (long long) len;
@@ -424,26 +466,37 @@ void download(const CatalogModel & m) {
                     return !download_cancelled(m);
                 });
 
-            const bool ok = res && status == 206 && wrote == end - start + 1;
-            std::lock_guard<std::mutex> lock(mu);
-            if (ok) {
+            if (res && status == 206 && wrote == end - start + 1) {
+                streak = 0;
+                std::lock_guard<std::mutex> lock(mu);
                 done[piece] = '1';
-                pwrite(pieces_fd, "1", 1, piece);
                 continue;
             }
             received -= wrote;  // the piece will be fetched again
-            failures++;
+            {
+                std::lock_guard<std::mutex> lock(mu);
+                if (piece < next) {
+                    next = piece;  // retry it
+                }
+            }
+            cli.reset();
+            if (disk_full || ++streak >= kMaxStreak) {
+                break;
+            }
             if (status == 403 || status == 410) {
-                // The signed CDN link expired: get a fresh one.
-                std::string again = resolve(m, why);
+                // The signed CDN link expired: get a fresh one, outside the
+                // lock so the other connections keep going.
+                std::string again_why;
+                const std::string again = resolve(m, again_why);
                 if (!again.empty()) {
+                    std::lock_guard<std::mutex> lock(mu);
                     cdn = again;
                 }
             }
-            if (piece < next) {
-                next = piece;  // retry it
+            const int wait_ms = 1000 << std::min(streak - 1, 4);
+            for (int ms = 0; ms < wait_ms && !download_cancelled(m); ms += 250) {
+                usleep(250 * 1000);
             }
-            cli.reset();
         }
         std::lock_guard<std::mutex> lock(finish_mu);
         running--;
@@ -455,9 +508,13 @@ void download(const CatalogModel & m) {
         spawn(worker);
     }
 
-    // Report progress until every worker is done.
+    // Report progress until every worker is done. Every few seconds, save the
+    // record, and keep the console from going into rest mode on its own timer
+    // (PS5 Game Compressor resets the same timer while it works).
     long long last  = received;
     auto      t0    = std::chrono::steady_clock::now();
+    auto      saved = t0;
+    auto      awake = t0 - std::chrono::seconds(10);
     {
         std::unique_lock<std::mutex> lock(finish_mu);
         while (running > 0) {
@@ -475,8 +532,17 @@ void download(const CatalogModel & m) {
                 last = got;
                 t0   = now;
             }
+            if (now - awake >= std::chrono::seconds(10)) {
+                sceShellCoreUtilResetAutoPowerDownTimer();
+                awake = now;
+            }
+            if (now - saved >= std::chrono::seconds(5)) {
+                save_record();
+                saved = now;
+            }
         }
     }
+    save_record();
     close(fd);
     close(pieces_fd);
 
@@ -487,14 +553,21 @@ void download(const CatalogModel & m) {
         });
         return;
     }
+    if (disk_full) {
+        fail("the console's storage is full");
+        return;
+    }
     for (int i = 0; i < count; i++) {
         if (done[i] != '1') {
             fail("some pieces failed, press Resume to fetch the rest");
             return;
         }
     }
+    if (rename(part_path.c_str(), final_path.c_str()) != 0) {
+        fail("could not rename " + part_path + ": " + strerror(errno));
+        return;
+    }
     unlink(pieces_path.c_str());
-    rename(part_path.c_str(), final_path.c_str());
     set_download(m, [&](Download & d) {
         d.active = false;
         d.done   = total;
@@ -568,6 +641,15 @@ bool chat_ready() {
     return res && res->status == 200;
 }
 
+// Whether llama-server answers at all: its /health says 503 while a model
+// loads, and the HTTP side starts before the model does.
+bool chat_answers() {
+    httplib::Client cli("127.0.0.1", kChatPort);
+    cli.set_connection_timeout(1, 0);
+    cli.set_read_timeout(2, 0);
+    return (bool) cli.Get("/health");
+}
+
 // ---- the library server ----------------------------------------------------
 
 // How much of an interrupted download is on disk, from its pieces record.
@@ -625,10 +707,35 @@ json state_json() {
     };
 }
 
-httplib::Server g_svr;
+std::atomic<bool> g_quit{false};     // SIGTERM or the Quit button
+std::atomic<bool> g_resumed{false};  // SIGCONT: the console woke from rest mode
 
-void setup_library() {
-    httplib::Server & svr = g_svr;
+// Leaves without Sony's exit(), which would run the static destructors while
+// the server and download threads still use those objects (compat/exit.cpp,
+// issue #3). An interrupted download resumes from its record next time.
+[[noreturn]] void quit_now() {
+    fprintf(stderr, "[ps5lm] quitting\n");
+    notify("PS5LM stopped");
+    fflush(nullptr);
+    _Exit(0);
+}
+
+std::unique_ptr<httplib::Server> make_library() {
+    auto server = std::make_unique<httplib::Server>();
+    httplib::Server & svr = *server;
+
+    // SO_REUSEADDR only. httplib's default is SO_REUSEPORT, which lets a
+    // second copy bind the same port, and then the "already running" check in
+    // main never fires. ftpsrv, websrv and Payload Manager all set REUSEADDR.
+    svr.set_socket_options([](socket_t s) {
+        int one = 1;
+        setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    });
+    // The PS5 browser can hold on to a cached page even after the cache is
+    // cleared in Settings (Payload Manager #40, fixed there in 3efc4f4).
+    svr.set_post_routing_handler([](const httplib::Request &, httplib::Response & res) {
+        res.set_header("Cache-Control", "no-store");
+    });
 
     svr.Get("/", [](const httplib::Request &, httplib::Response & res) {
         res.set_content((const char *) library_html, library_html_len, "text/html; charset=utf-8");
@@ -636,6 +743,11 @@ void setup_library() {
 
     svr.Get("/api/state", [](const httplib::Request &, httplib::Response & res) {
         res.set_content(state_json().dump(), "application/json");
+    });
+
+    // For the watchdog: answers as long as the server does.
+    svr.Get("/api/ping", [](const httplib::Request &, httplib::Response & res) {
+        res.set_content("ok", "text/plain");
     });
 
     svr.Post("/api/download", [](const httplib::Request & req, httplib::Response & res) {
@@ -703,20 +815,132 @@ void setup_library() {
         }
         unlink((kModels + "/" + file).c_str());
         unlink((kModels + "/" + file + ".part").c_str());
+        unlink((kModels + "/" + file + ".pieces").c_str());
     });
 
+    // Payload Manager can only SIGKILL a payload; this frees the model's
+    // locked memory from the page itself. The watchdog does the leaving, once
+    // this answer is out.
+    svr.Post("/api/quit", [](const httplib::Request &, httplib::Response &) {
+        g_quit = true;
+    });
+
+    return server;
+}
+
+std::mutex        g_svr_mu;
+httplib::Server * g_svr = nullptr;  // the library server listening now
+
+// Serves the library for as long as the process runs. After rest mode the
+// listening socket can go stale without an error, and on some network errors
+// httplib returns from listen; either way a new server is built and bound
+// again (Payload Manager #61 and cd9ad1f, websrv e5a6369, ftpsrv 4f7408a).
+void serve_library(httplib::Server * first) {
+    std::unique_ptr<httplib::Server> svr(first);
+    for (;;) {
+        {
+            std::lock_guard<std::mutex> lock(g_svr_mu);
+            g_svr = svr.get();
+        }
+        svr->listen_after_bind();
+        {
+            std::lock_guard<std::mutex> lock(g_svr_mu);
+            g_svr = nullptr;
+        }
+        fprintf(stderr, "[ps5lm] library server stopped, starting it again\n");
+        do {
+            sleep(1);
+            svr = make_library();
+        } while (!svr->bind_to_port("0.0.0.0", kLibraryPort));
+    }
+}
+
+void restart_library() {
+    std::lock_guard<std::mutex> lock(g_svr_mu);
+    if (g_svr) {
+        g_svr->stop();
+    }
+}
+
+bool library_answers() {
+    httplib::Client cli("127.0.0.1", kLibraryPort);
+    cli.set_connection_timeout(1, 0);
+    cli.set_read_timeout(2, 0);
+    auto res = cli.Get("/api/ping");
+    return res && res->status == 200;
+}
+
+// Restarts the servers when they may have gone deaf: on waking from rest mode
+// (SIGCONT, as Payload Manager does it), on a new address, or when the library
+// misses two checks in a row on loopback. Also logs free flexible memory when
+// it moves by 64 MiB or more, for issue #10 (PS5CEMU-HAR logs its own the same
+// way).
+void watchdog() {
+    std::string ip          = local_ip();
+    int         misses      = 0;
+    size_t      logged_free = 0;
+    for (int tick = 1;; tick++) {
+        sleep(1);
+        if (g_quit) {
+            quit_now();
+        }
+        const bool resumed = g_resumed.exchange(false);
+        if (!resumed && tick % 5 != 0) {
+            continue;
+        }
+
+        const std::string now_ip = local_ip();
+        if (resumed || now_ip != ip) {
+            fprintf(stderr, "[ps5lm] %s, restarting the servers\n",
+                    resumed ? "woke from rest mode" : ("address " + ip + " -> " + now_ip).c_str());
+            ip = now_ip;
+            restart_library();
+            std::string running;
+            {
+                std::lock_guard<std::mutex> lock(g_run_mu);
+                running = g_running;
+            }
+            sleep(1);
+            if (!running.empty() && !chat_answers()) {
+                request_model(running);
+            }
+            misses = 0;
+            continue;
+        }
+
+        misses = library_answers() ? 0 : misses + 1;
+        if (misses >= 2) {
+            fprintf(stderr, "[ps5lm] the library stopped answering, restarting it\n");
+            restart_library();
+            misses = 0;
+        }
+
+        size_t free_flex = 0;
+        if (sceKernelAvailableFlexibleMemorySize(&free_flex) == 0 &&
+            (free_flex >= logged_free + (64u << 20) || free_flex + (64u << 20) <= logged_free)) {
+            fprintf(stderr, "[ps5lm] free flexible memory: %zu MiB\n", free_flex >> 20);
+            logged_free = free_flex;
+        }
+    }
 }
 
 void open_browser(const std::string & url) {
-    sceUserServiceInitialize(nullptr);
-    if (sceSystemServiceLaunchWebBrowser(url.c_str(), nullptr) != 0) {
-        fprintf(stderr, "[ps5lm] could not open the browser\n");
+    const int rc = sceSystemServiceLaunchWebBrowser(url.c_str(), nullptr);
+    if (rc != 0) {
+        fprintf(stderr, "[ps5lm] could not open the browser: 0x%08x\n", (unsigned) rc);
+        notify("Open " + url + " in the browser");
     }
 }
 
 }  // namespace
 
 int main(int argc, char ** argv) {
+    // The name Payload Manager looks payloads up by (ftpsrv, websrv and
+    // Payload Manager name themselves the same way).
+    syscall(SYS_thr_set_name, -1, "ps5lm.elf");
+    signal(SIGPIPE, SIG_IGN);
+    sceUserServiceInitialize(nullptr);
+
     mkdir(kRoot.c_str(), 0777);
     mkdir(kModels.c_str(), 0777);
     mkdir(kWww.c_str(), 0777);
@@ -724,11 +948,12 @@ int main(int argc, char ** argv) {
     const std::string library_url = "http://127.0.0.1:" + std::to_string(kLibraryPort) + "/";
 
     // A second copy finds the port taken: show the running one and leave.
-    setup_library();
-    if (!g_svr.bind_to_port("0.0.0.0", kLibraryPort)) {
+    auto library = make_library();
+    if (!library->bind_to_port("0.0.0.0", kLibraryPort)) {
         notify("PS5LM is already running");
         open_browser(library_url);
-        return 0;
+        fflush(nullptr);
+        _Exit(0);
     }
 
     // Started from Payload Manager there is nowhere to print; keep a log.
@@ -741,10 +966,15 @@ int main(int argc, char ** argv) {
     setvbuf(stderr, nullptr, _IOLBF, 0);
     fprintf(stderr, "[ps5lm] PS5LM %s, library on port %d\n", kVersion, kLibraryPort);
 
+    signal(SIGCONT, [](int) { g_resumed = true; });
+    signal(SIGTERM, [](int) { g_quit = true; });
+
     write_file(kWww + "/index.html", chat_html, chat_html_len);
     write_file(kCaFile, ca_bundle, ca_bundle_len);
 
-    spawn([] { g_svr.listen_after_bind(); });
+    httplib::Server * first = library.release();
+    spawn([first] { serve_library(first); });
+    spawn(watchdog);
 
     // Pick up where the last session left off.
     const std::string last = read_text(kLastFile);

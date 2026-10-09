@@ -259,3 +259,7 @@ int accept4(int s, struct sockaddr *restrict addr, socklen_t *restrict addrlen, 
     }
     return fd;
 }
+
+/* ps5-homebrew-ui's system.cpp calls this before hiding the splash, for apps
+ * whose runtime holds the request back; PS5LM's does not. */
+void hui_release_splash(void) {}

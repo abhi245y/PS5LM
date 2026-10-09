@@ -20,10 +20,11 @@ tool="$vk/build/host/ps5-native-tool"
 llama="$root/third_party/llama.cpp"
 out="$root/build/app-ps5"
 headers="$root/.deps/ps5-vk-headers"
+glsdk=${PS5_OPENGL_SDK:-$root/.deps/ps5-opengl/ps5-opengl-sdk-1.0.0/sdk}
 sce_sys="$root/ps5/app/sce_sys"
 param="$sce_sys/param.json"
 
-for f in "$archive" "$tool" "$vk/runtime/libc.prx" "$sdk/bin/prospero-lld"; do
+for f in "$archive" "$tool" "$vk/runtime/libc.prx" "$sdk/bin/prospero-lld" "$glsdk/lib/libPS5OpenGL.a"; do
     [ -e "$f" ] || { echo "build-app: missing $f" >&2; exit 2; }
 done
 export PS5_PAYLOAD_SDK="$sdk" PS5_VULKAN_ROOT="$vk"
@@ -81,7 +82,10 @@ cmake --build "$out/llama" --target llama-server-impl
 obj="$out/obj"
 mkdir -p "$obj" "$out/stubs"
 cxx() { "$root/ps5/app/ps5cxx" -std=c++17 -O2 -ffunction-sections -fdata-sections "$@"; }
-cxx -fexceptions -fcxx-exceptions -frtti -I "$headers/include" -I "$llama/ggml/include" -c "$root/ps5/app/main.cpp" -o "$obj/main.o"
+cxx -std=c++20 -fexceptions -fcxx-exceptions -frtti -I "$headers/include" -I "$llama/ggml/include" -I "$root/third_party/ps5-homebrew-ui/src" \
+    -I "${PS5_OPENGL_SDK:-$root/.deps/ps5-opengl/ps5-opengl-sdk-1.0.0/sdk}/include" -DGL_GLEXT_PROTOTYPES=1 \
+    -c "$root/ps5/app/main.cpp" -o "$obj/main.o"
+cxx -fexceptions -fcxx-exceptions -c "$root/ps5/app/model_plan.cpp" -o "$obj/model_plan.o"
 "$root/ps5/app/ps5cc" -O2 -c "$root/ps5/app/compat_app.c" -o "$obj/compat_app.o"
 # In an archive, so --exclude-libs keeps them local: a stub module defines some
 # of the same names, and lld would otherwise export ours to interpose them,
@@ -89,12 +93,72 @@ cxx -fexceptions -fcxx-exceptions -frtti -I "$headers/include" -I "$llama/ggml/i
 rm -f "$obj/libps5app_compat.a"
 "$sdk/bin/llvm-ar" rcs "$obj/libps5app_compat.a" "$obj/compat_app.o"
 cxx -std=c++20 -fno-exceptions -fno-rtti -c "$vk/tooling/native/app_crt.cpp" -o "$obj/app_crt.o"
-cxx -std=c++20 -fno-exceptions -fno-rtti -c "$vk/tooling/native/app_cpp_runtime.cpp" -o "$obj/app_cpp_runtime.o"
+cxx -std=c++20 -fexceptions -fcxx-exceptions -c "$root/ps5/app/cpp_runtime.cpp" -o "$obj/app_cpp_runtime.o"
 
-# AGC comes from system modules; these stubs only name the imports.
-for pair in libSceAgc:agc_canary_link_stub.c libSceAgcDriver:agc_driver_canary_link_stub.c; do
-    lib=${pair%%:*}
-    "$root/ps5/app/ps5cc" -O2 -fPIC -c "$vk/vendor/ps5/sdk/stubs/${pair#*:}" -o "$obj/${lib}_stub.o"
+# The screen: ps5-opengl (EGL, OpenGL 4.6) is a Mesa of its own, and shares
+# thousands of symbol names with RADV's. Linked into one object with only the
+# GL and EGL API left global, the two never meet. Rebuilt when the SDK changes.
+gl="$out/gl/gl_api.o"
+if [ ! -f "$gl" ] || [ "$glsdk/lib/libPS5OpenGL.a" -nt "$gl" ]; then
+    mkdir -p "$out/gl"
+    gllibs=()
+    for l in $(sed -n '/GROUP (/,/)/p' "$glsdk/lib/libPS5OpenGL.a" | grep -oE 'lib[a-z0-9_.]+\.a'); do
+        gllibs+=("$glsdk/lib/$l")
+    done
+    "$sdk/bin/llvm-nm" --defined-only -g "$glsdk/lib/libps5_opengl_core33.a" "$glsdk/lib/libglapi_bridge.a" \
+        "$glsdk/lib/libglapi.a" 2>/dev/null | awk 'NF>=3 && $2 ~ /[TW]/ {print $3}' |
+        grep -E '^(gl|egl)[A-Z]|^ps5_opengl' | sort -u > "$out/gl/api.txt"
+    us=()
+    while read -r name; do us+=(-u "$name"); done < "$out/gl/api.txt"
+    "$sdk/bin/ld.lld" -r "${us[@]}" -u ps5_agc_gate2_run --start-group "${gllibs[@]}" --end-group \
+        -o "$out/gl/gl_all.o"
+    "$sdk/bin/llvm-objcopy" --keep-global-symbols="$out/gl/api.txt" "$out/gl/gl_all.o" "$gl"
+    rm -f "$out/gl/gl_all.o" "$out/gl/libps5lm_gl.a"
+    # In an archive, so --exclude-libs keeps the API local: SDK stub modules
+    # define EGL names too, and lld would export ours to interpose them.
+    "$sdk/bin/llvm-ar" rcs "$out/gl/libps5lm_gl.a" "$gl"
+fi
+# The dashboard: ps5-homebrew-ui's kit (gfx, ui, core, audio and its console
+# platform layer, without its shell, designs or demo), drawn through ps5-opengl.
+kit="$root/third_party/ps5-homebrew-ui"
+kitflags=(-std=c++20 -O2 -ffunction-sections -fdata-sections -DGL_GLEXT_PROTOTYPES=1 -I "$kit/src" -I "$kit/third_party"
+    -I "$glsdk/include" -I "$root/ps5/app")
+mkdir -p "$obj/kit"
+mapfile -t kit_sources < <(find "$kit/src/gfx" "$kit/src/ui" "$kit/src/core" "$kit/src/audio" "$kit/src/third_party" \
+    "$kit/src/platform/ps5" -type f \( -name '*.cpp' -o -name '*.c' \) ! -name display_egl.cpp | sort)
+kit_objects=()
+for src in "${kit_sources[@]}"; do
+    o="$obj/kit/$(echo "${src#"$kit/src/"}" | tr '/' '_').o"
+    kit_objects+=("$o")
+    [ -f "$o" ] && [ "$o" -nt "$src" ] && continue
+    if [[ $src == *.c ]]; then
+        "$root/ps5/app/ps5cc" -std=c11 -O2 -w -I "$kit/src" -c "$src" -o "$o" &
+    else
+        cxx "${kitflags[@]}" -w -c "$src" -o "$o" &
+    fi
+    (( $(jobs -r | wc -l) >= $(nproc) )) && wait -n
+done
+wait
+rm -f "$obj/libps5lm_kit.a"
+"$sdk/bin/llvm-ar" rcs "$obj/libps5lm_kit.a" "${kit_objects[@]}"
+for src in display dashboard stats; do
+    cxx -fexceptions -fcxx-exceptions "${kitflags[@]}" -c "$root/ps5/app/$src.cpp" -o "$obj/$src.o"
+done
+
+# AGC comes from system modules; these stubs only name the imports, every
+# one either driver (the GL object, RADV) makes.
+agc_imports=$("$sdk/bin/llvm-nm" -u "$gl" "$archive" 2>/dev/null | awk '{print $NF}' | grep -E '^sceAgc' | sort -u)
+for lib in libSceAgc libSceAgcDriver; do
+    stub_c="$out/stubs/$lib.c"
+    : > "$stub_c"
+    for name in $agc_imports; do
+        case $lib:$name in
+            libSceAgcDriver:sceAgcDriver*) echo "void $name(void) {}" >> "$stub_c" ;;
+            libSceAgc:sceAgcDriver*) ;;
+            libSceAgc:*) echo "void $name(void) {}" >> "$stub_c" ;;
+        esac
+    done
+    "$root/ps5/app/ps5cc" -O2 -fPIC -c "$stub_c" -o "$obj/${lib}_stub.o"
     "$sdk/bin/prospero-lld" --shared -soname "$lib.prx" -o "$out/stubs/$lib.so" "$obj/${lib}_stub.o"
 done
 
@@ -106,13 +170,13 @@ flags=()
 for f in "${radv_link_flags[@]}"; do
     case $f in --defsym=getaddrinfo=*|--defsym=freeaddrinfo=*) ;; *) flags+=("$f") ;; esac
 done
-radv_link_flags=("${flags[@]}")
+radv_link_flags=("${flags[@]}" --wrap=sceAgcInit)
 mapfile -t libs < <(find "$out/llama" -name '*.a' | sort)
 "$sdk/bin/prospero-lld" "${radv_linker_script[@]}" --eh-frame-hdr "${radv_link_flags[@]}" \
     --version-script "$vk/tooling/native/app-symbols.map" --exclude-libs=ALL \
     -e _start -o "$out/llvm-pie.elf" \
-    "$obj/app_crt.o" "$obj/app_cpp_runtime.o" "$obj/main.o" \
-    --start-group "${libs[@]}" "$obj/libps5app_compat.a" --end-group \
+    "$obj/app_crt.o" "$obj/app_cpp_runtime.o" "$obj/main.o" "$obj/display.o" "$obj/model_plan.o" "$obj/dashboard.o" "$obj/stats.o" \
+    --start-group "${libs[@]}" "$obj/libps5lm_kit.a" "$obj/libps5app_compat.a" "$out/gl/libps5lm_gl.a" --end-group \
     "$out/stubs/libSceAgc.so" "$out/stubs/libSceAgcDriver.so" \
     "${radv_link_inputs[@]}" \
     --as-needed "$sdk"/target/lib/*.so
@@ -139,5 +203,12 @@ if [ ! -f "$sce_sys/pic0.dds" ] || [ "$sce_sys/source/background.svg" -nt "$sce_
 fi
 cp "$sce_sys/icon0.png" "$sce_sys/pic0.dds" "$sce_sys/pic1.dds" "$app/sce_sys/"
 cp "$vk/runtime/libc.prx" "$app/sce_module/libc.prx"
+# The dashboard's fonts and interface sounds (ps5-homebrew-ui's, with their licences).
+mkdir -p "$app/assets/fonts" "$app/assets/audio"
+for font in inter-regular inter-semibold montserrat-medium dejavu-sans-mono; do
+    cp "$root/third_party/ps5-homebrew-ui/assets/fonts/$font.huifont" "$app/assets/fonts/"
+done
+cp "$root/third_party/ps5-homebrew-ui/assets/fonts/"*LICENSE* "$app/assets/fonts/"
+cp -r "$root/third_party/ps5-homebrew-ui/assets/audio/sfx" "$app/assets/audio/"
 "$tool" self --inspect --file "$app/eboot.bin" > /dev/null
 echo "build-app: $app ($(stat -c %s "$app/eboot.bin") bytes)"

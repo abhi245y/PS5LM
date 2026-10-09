@@ -97,11 +97,25 @@ The app links llama.cpp with ggml-vulkan against [PS5_Vulkan](https://github.com
 scripts/build-app.sh             # build/app-ps5/title/PPSA99581
 ```
 
-Copy `build/app-ps5/title/PPSA99581` to `/data/homebrew/PPSA99581` and the model to `/data/PS5LM/models`, then start **PS5LM** from the home screen. The screen stays black; after about 90 s the chat is at `http://<console IP>:8081`. Its arguments come from `/data/PS5LM/app-args.txt` (one per line) and its log goes to `/data/PS5LM/app.log` and `llama.log`.
+Copy `build/app-ps5/title/PPSA99581` to `/data/homebrew/PPSA99581` and a model to `/data/PS5LM/models`, then start **PS5LM** from the home screen. The chat is at `http://<console IP>:8081` once the model is on the GPU (about 90 s).
+
+**On the TV** the app shows a dashboard drawn with [ps5-homebrew-ui](https://github.com/blackbearreloaded/ps5-homebrew-ui) (a submodule in `third_party/`): generation speed, how busy the GPU is, CPU use, the memory pool the GPU and CPU share and how the model, its KV cache and the rest split it, context in use, and the model. Cross on the Model tile opens the **model library**: every `.gguf` in `/data/PS5LM/models` and on USB drives (`/mnt/usbN` or `/mnt/usbN/PS5LM/models`), each with the context and KV cache type the planner (`ps5/app/model_plan.cpp`) picks for the memory free, and the sampling settings of its family when it is a model we know (Qwen 3.5/3.6/3.8, Gemma 4, gpt-oss, Granite, Nemotron, Mistral, Llama). Cross loads one, or imports one from USB into internal storage.
+
+`/data/PS5LM/app-args.txt` (one argument per line) overrides the planner. The app logs to `/data/PS5LM/app.log` and `llama.log`.
+
+From the PC:
+
+```sh
+scripts/preview-app-ui.sh                  # render the dashboard to build/app-preview/*.png (Mesa, no console)
+PS5_HOST=<console IP> scripts/ps5lm-app.sh cycle   # close, deploy, launch; also close|deploy|launch
+```
+
+The app closes itself on request (`/data/PS5LM/quit`), so nothing is killed while it draws; launching uses [ps5-homebrew-dev-protocol](https://github.com/blackbearreloaded/ps5-homebrew-dev-protocol)'s launch payload, cloned into `.deps/src`.
 
 ## Credits
 
 - [llama.cpp / ggml](https://github.com/ggml-org/llama.cpp), which does the actual work.
+- [PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan) (Mihawk-99) for RADV on the PS5, and [ps5-homebrew-ui](https://github.com/blackbearreloaded/ps5-homebrew-ui), [ps5-opengl](https://github.com/blackbearreloaded/ps5-opengl) and ps5-homebrew-dev-protocol (BlackBearReloaded) for the app's screen and tooling.
 - [ps5-payload-dev](https://github.com/ps5-payload-dev) (John Törnblom) for the SDK and the ELF loader.
 - [PS5SX2](https://github.com/Swordpdf/PS5SX2), [ProsperoAI](https://github.com/blackbearreloaded/ProsperoAI) and [PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan), whose notes on the console's memory and GPU this project leans on.
 

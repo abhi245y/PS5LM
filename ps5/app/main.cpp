@@ -254,12 +254,6 @@ struct Models {
     pthread_t              server{};
     bool                   server_started = false;
 
-    // Import from USB, one at a time.
-    std::mutex             import_mutex;
-    std::string            importing;        // source path
-    std::atomic<float>     import_progress{ -1 };
-    std::atomic<bool>      import_done{ false };
-
     void scan(StatsCollector & stats) {
         rows.clear();
         for (const auto & path : find_models(kModelDirs)) {
@@ -289,12 +283,8 @@ struct Models {
 
     void publish(StatsCollector & stats) {
         std::vector<ModelRow> out = rows;
-        std::lock_guard<std::mutex> lock(import_mutex);
         for (auto & r : out) {
             r.current = r.file == running;
-            if (r.file == importing) {
-                r.import_progress = import_progress;
-            }
         }
         stats.set_models(out);
     }
@@ -347,50 +337,6 @@ struct Models {
         server_started = false;
         running.clear();
         log_memory("after unloading");
-    }
-
-    void begin_import(const std::string & from) {
-        {
-            std::lock_guard<std::mutex> lock(import_mutex);
-            if (!importing.empty()) {
-                return;
-            }
-            importing = from;
-        }
-        import_progress = 0;
-        import_done = false;
-        std::thread([this, from] {
-            const std::string to = std::string(kModels) + "/" + base_name(from) + ".gguf";
-            const std::string part = to + ".part";
-            FILE * in = std::fopen(from.c_str(), "rb");
-            FILE * out = in ? std::fopen(part.c_str(), "wb") : nullptr;
-            bool ok = in && out;
-            if (ok) {
-                std::fseek(in, 0, SEEK_END);
-                const double total = (double) std::ftell(in);
-                std::fseek(in, 0, SEEK_SET);
-                std::vector<char> buf(8u << 20);
-                double done = 0;
-                for (size_t n; ok && (n = std::fread(buf.data(), 1, buf.size(), in)) > 0;) {
-                    ok = std::fwrite(buf.data(), 1, n, out) == n;
-                    done += (double) n;
-                    import_progress = (float) (done / total);
-                }
-                ok = ok && std::fflush(out) == 0 && fsync(fileno(out)) == 0;
-            }
-            if (in) std::fclose(in);
-            if (out) std::fclose(out);
-            ok = ok && std::rename(part.c_str(), to.c_str()) == 0;
-            if (!ok) {
-                std::remove(part.c_str());
-            }
-            std::printf("ps5lm-app: import %s: %s\n", from.c_str(), ok ? "done" : "failed");
-            notify(ok ? "PS5LM: model imported" : "PS5LM: import failed (space on /data?)");
-            std::lock_guard<std::mutex> lock(import_mutex);
-            importing.clear();
-            import_progress = -1;
-            import_done = true;
-        }).detach();
     }
 };
 
@@ -458,8 +404,9 @@ int main(int, char **) {
     stats.start(kPort);
     models.scan(stats);
 
-    // Which model: app-args.txt verbatim, else model.txt (the library's last
-    // choice), else the largest that fits with at least 8k of context.
+    // Which model: app-args.txt verbatim, else model.txt, which the library
+    // writes just before restarting the app for a switch and which is used
+    // once. A plain launch loads nothing and opens the library instead.
     Live model_part;
     std::vector<std::string> args = read_lines(kArgs);
     std::string path;
@@ -473,18 +420,9 @@ int main(int, char **) {
         std::printf("ps5lm-app: app-args.txt overrides the planner\n");
     } else {
         const auto chosen = read_lines(kChoice);
-        double best = -1;
-        // "none": the user unloaded the model; start without one.
-        for (const auto & r : chosen.empty() || chosen[0] != "none" ? models.rows : std::vector<ModelRow>{}) {
-            if (!r.fits || r.on_usb) {
-                continue;
-            }
-            if (!chosen.empty() && r.file == chosen[0]) {
-                path = r.file;
-                break;
-            }
-            if (r.size_gib > best) {
-                best = r.size_gib;
+        unlink(kChoice);
+        for (const auto & r : models.rows) {
+            if (r.fits && !chosen.empty() && r.file == chosen[0]) {
                 path = r.file;
             }
         }
@@ -497,7 +435,9 @@ int main(int, char **) {
         models.start(path, args, stats, model_part);
     } else {
         stats.set_state(ServerState::no_model);
-        notify("PS5LM: no model fits; copy a .gguf to /data/PS5LM/models or import one from USB");
+        if (models.rows.empty()) {
+            notify("PS5LM: no models; copy a .gguf to /data/PS5LM/models or PS5LM/models on a USB drive");
+        }
     }
 
     // Input and sound, as ps5-homebrew-ui's own app does.
@@ -511,6 +451,7 @@ int main(int, char **) {
     sounds.load(std::string(kAssets) + "/audio/sfx");
 
     Dashboard dash(fonts);
+    bool      library_shown = false;  // opened once at launch when no model is loaded
     DashboardFrame frame;
     hui::ui::Feedback feedback;
     hui::PadSample samples[64];
@@ -536,10 +477,13 @@ int main(int, char **) {
         if (n % 30 == 0) {
             models.publish(stats);
         }
-        if (models.import_done.exchange(false)) {
-            models.scan(stats);
-        }
         dash.set_live(live);
+        if (!library_shown && !live.models.empty()) {
+            library_shown = true;
+            if (live.state == ServerState::no_model) {
+                dash.open_library();
+            }
+        }
         feedback.clear();
         dash.update(input, dt, feedback);
         for (const auto & cue : feedback.cues) {
@@ -551,19 +495,15 @@ int main(int, char **) {
         pad.tick(dt);
 
         Dashboard::Request req = dash.take_request();
-        // The same requests from the PC (scripts/ps5lm-app.sh load|import).
+        // The same requests from the PC (scripts/ps5lm-app.sh load|unload).
         if (n % 60 == 30 && req.kind == Dashboard::Request::none) {
             if (std::string p = take_request_file("/data/PS5LM/load"); !p.empty()) {
                 req = { Dashboard::Request::load, p };
             } else if (!take_request_file("/data/PS5LM/unload").empty()) {
                 req = { Dashboard::Request::unload, "" };
-            } else if (std::string q = take_request_file("/data/PS5LM/import"); !q.empty()) {
-                req = { Dashboard::Request::import, q };
             }
         }
-        if (req.kind == Dashboard::Request::import) {
-            models.begin_import(req.path);
-        } else if (req.kind == Dashboard::Request::unload || req.kind == Dashboard::Request::load) {
+        if (req.kind == Dashboard::Request::unload || req.kind == Dashboard::Request::load) {
             // Unloading in place leaves part of the model's GPU memory held
             // (about 5 GiB of a 6.8 GiB model, measured), so a model change
             // restarts the app: the system replaces the process (LoadExec on

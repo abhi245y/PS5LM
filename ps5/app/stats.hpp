@@ -28,8 +28,7 @@ struct ModelRow {
     double      size_gib = 0;
     bool        fits     = false;
     bool        current  = false;
-    bool        on_usb   = false;  // found on a USB drive: importable to internal storage
-    float       import_progress = -1;  // 0..1 while it is being copied in
+    bool        on_usb   = false;  // on a USB drive; loads from there like internal ones
 };
 
 struct Live {

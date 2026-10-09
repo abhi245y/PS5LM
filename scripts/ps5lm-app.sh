@@ -7,7 +7,6 @@
 #   scripts/ps5lm-app.sh cycle     close, deploy, launch
 #   scripts/ps5lm-app.sh screenshot [file]   what the TV shows, as a BMP
 #   scripts/ps5lm-app.sh load <model path>   switch the model, as the library does
-#   scripts/ps5lm-app.sh import <path>       copy a .gguf into /data/PS5LM/models
 #   scripts/ps5lm-app.sh unload              unload the model
 #
 # The app is never killed: it polls /data/PS5LM/quit and leaves through
@@ -74,12 +73,11 @@ screenshot() {
 
 case ${1:-} in
     load) request load "${2:?model path on the console}" ;;
-    import) request import "${2:?file path on the console}" ;;
     unload) request unload ;;
     screenshot) screenshot "${2:-}" ;;
     close) close ;;
     deploy) deploy ;;
     launch) launch ;;
     cycle) close; deploy; launch ;;
-    *) echo "usage: $0 close|deploy|launch|cycle|screenshot|load|unload|import" >&2; exit 2 ;;
+    *) echo "usage: $0 close|deploy|launch|cycle|screenshot|load|unload" >&2; exit 2 ;;
 esac

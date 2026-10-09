@@ -36,13 +36,13 @@ class Dashboard {
     explicit Dashboard(const hui::ui::Fonts & fonts) : fonts_(fonts) { ring_.snap(ring_rect()); }
 
     void set_live(const Live & live) { live_ = live; }
+    void open_library();  // over the dashboard, cursor on the loaded model
     void update(const hui::InputFrame & input, float dt, hui::ui::Feedback & feedback);
     void draw(DashboardFrame & frame) const;
 
-    // What the user asked for in the library, once: load a model, or import
-    // one from a USB drive. Empty path: nothing.
+    // What the user asked for in the library, once: load or unload a model.
     struct Request {
-        enum Kind { none, load, unload, import } kind = none;
+        enum Kind { none, load, unload } kind = none;
         std::string path;
     };
     Request take_request() {
@@ -76,7 +76,8 @@ class Dashboard {
     bool  library_open_ = false;
     int   library_cursor_ = 0;
     hui::tween::Spring library_;   // 0 closed, 1 open
-    hui::tween::Spring cursor_y_;  // the highlight's row
+    hui::tween::Spring cursor_y_;  // the highlight's slot
+    int slot(int row) const;       // a model row's line in the list, after the section headers
     mutable char size_text_[64] = {};
 };
 

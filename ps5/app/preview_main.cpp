@@ -114,7 +114,6 @@ ps5lm::Live sample(float seconds, bool generating) {
     usb.plan = "64k context, q8_0 cache: 9.1 of 11.0 GiB";
     usb.preset = "Gemma 4";
     usb.size_gib = 5.30;
-    usb.import_progress = 0.42f;
     L.models.push_back(usb);
     if (g_loading >= 0) {
         L.state = ps5lm::ServerState::loading;
@@ -230,7 +229,7 @@ int main(int argc, char ** argv) {
     step(30, nav(hui::Direction::up), false);
     shot("04-library-choose");
     for (int i = 0; i < 3; ++i) {
-        step(12, nav(hui::Direction::down), false);
+        step(25, nav(hui::Direction::down), false);
     }
     shot("05-library-usb");
     return ok ? 0 : 1;

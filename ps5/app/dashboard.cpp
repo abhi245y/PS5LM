@@ -182,14 +182,11 @@ void Dashboard::update(const hui::InputFrame & input, float dt, ui::Feedback & f
         }
         if (input.is_pressed(Action::confirm) && rows > 0) {
             const ModelRow & m = live_.models[(size_t) library_cursor_];
-            if (m.on_usb && m.import_progress < 0) {
-                request_ = { Request::import, m.file };
-                feedback.play(hui::audio::Cue::select);
-            } else if (m.current) {
+            if (m.current) {
                 request_ = { Request::unload, m.file };
                 library_open_ = false;
                 feedback.play(hui::audio::Cue::back);
-            } else if (!m.on_usb && m.fits) {
+            } else if (m.fits) {
                 request_ = { Request::load, m.file };
                 library_open_ = false;
                 feedback.play(hui::audio::Cue::complete);
@@ -227,14 +224,7 @@ void Dashboard::update(const hui::InputFrame & input, float dt, ui::Feedback & f
             }
         }
         if (input.is_pressed(Action::confirm) && focus_ == kModel) {
-            library_open_ = true;
-            library_cursor_ = 0;
-            for (int i = 0; i < rows; ++i) {
-                if (live_.models[(size_t) i].current) {
-                    library_cursor_ = i;
-                }
-            }
-            cursor_y_.snap((float) library_cursor_);
+            open_library();
             feedback.play(hui::audio::Cue::open);
         }
     }
@@ -248,7 +238,7 @@ void Dashboard::update(const hui::InputFrame & input, float dt, ui::Feedback & f
     refusal_.update(dt, 9.0f);
     library_.target = library_open_ ? 1.0f : 0.0f;
     library_.update(dt, 13.0f);
-    cursor_y_.target = (float) library_cursor_;
+    cursor_y_.target = (float) slot(library_cursor_);
     cursor_y_.update(dt, 20.0f);
 }
 
@@ -491,7 +481,7 @@ void Dashboard::draw_content(gfx::DrawList & list, int tile, const Rect & r, flo
             if (L.model_label.empty()) {
                 ui::text(list, f.semibold, "No model loaded", r.x + kPad, r.y + 104, 34, kInk);
                 ui::text(list, f.regular, "Cross opens the library", r.x + kPad, r.y + 138, 20, kInk.with_alpha(kMuted));
-                std::snprintf(text, sizeof(text), "%zu installed", L.models.size());
+                std::snprintf(text, sizeof(text), "%zu found", L.models.size());
                 ui::text(list, f.regular, text, r.x + kPad, r.y + 352, 20, kInk.with_alpha(kFaint));
                 break;
             }
@@ -510,7 +500,7 @@ void Dashboard::draw_content(gfx::DrawList & list, int tile, const Rect & r, flo
                 caps(list, f, rows[k][0], r.x + kPad, y, 15, kInk.with_alpha(kMuted));
                 ui::text(list, f.mono, rows[k][1], r.x + r.w - kPad, y + 2, 22, kInk, gfx::Align::right);
             }
-            std::snprintf(text, sizeof(text), "%zu installed", L.models.size());
+            std::snprintf(text, sizeof(text), "%zu found", L.models.size());
             ui::text(list, f.regular, text, r.x + kPad, r.y + 352, 20, kInk.with_alpha(kFaint));
             break;
         }
@@ -578,7 +568,7 @@ void Dashboard::draw_library(gfx::DrawList & list, std::uint32_t glass) const {
     draw_panel(list, panel, 40, 1.0f, kLime);
     caps(list, f, "MODEL LIBRARY", panel.x + 56, panel.y + 60, 20, kLime);
     ui::text(list, f.regular,
-             f.regular.font->fit("Settings fit the memory free now. Add models over FTP to /data/PS5LM/models, or import them from USB.",
+             f.regular.font->fit("Settings fit the memory free now. Models go in /data/PS5LM/models, or PS5LM/models on USB.",
                                  20, panel.w - 112),
              panel.x + 56, panel.y + 98, 20, kInk.with_alpha(kMuted));
 
@@ -587,38 +577,66 @@ void Dashboard::draw_library(gfx::DrawList & list, std::uint32_t glass) const {
     if (rows == 0) {
         ui::text(list, f.regular, "No models found yet", panel.cx(), panel.cy(), 26, kInk.with_alpha(kFaint), gfx::Align::center);
     }
-    // Eight rows show; the list scrolls to keep the cursor among them.
-    const int   first = std::max(0, library_cursor_ - 7);
+    // Eight lines show, section headers included; the list scrolls to keep
+    // the cursor among them.
+    const int   first = rows > 0 ? std::max(0, slot(library_cursor_) - 7) : 0;
     const Rect hl{ panel.x + 36, top + (cursor_y_.value - (float) first) * kRowH, panel.w - 72, kRowH - 8 };
     if (rows > 0) {
         list.glow(hl, 18, 18, kLime.with_alpha(0.25f));
         list.bordered_rect(hl, 18, kLime.with_alpha(0.1f), 2.0f, kLime.with_alpha(0.7f));
     }
-    for (int i = first; i < rows && i < first + 8; ++i) {
+    for (int i = 0; i < rows; ++i) {
         const ModelRow & m = live_.models[(size_t) i];
-        const float y = top + (float) (i - first) * kRowH;
+        const int   s = slot(i);
+        if (i == 0 || m.on_usb != live_.models[(size_t) i - 1].on_usb) {
+            const int h = s - 1;
+            if (h >= first && h < first + 8) {
+                const float hy = top + (float) (h - first) * kRowH;
+                caps(list, f, m.on_usb ? "USB DRIVE" : "INTERNAL STORAGE", panel.x + 60, hy + 50, 16,
+                     m.on_usb ? kAmber : kCyan);
+                list.rounded_rect({ panel.x + 60, hy + 62, panel.w - 120, 1 }, 0, kInk.with_alpha(0.12f));
+            }
+        }
+        if (s < first || s >= first + 8) {
+            continue;
+        }
+        const float y = top + (float) (s - first) * kRowH;
         const float ink = m.fits ? 1.0f : 0.45f;
         ui::text(list, f.semibold, f.semibold.font->fit(m.label, 24, 620), panel.x + 60, y + 32, 24, kInk.with_alpha(ink));
         std::string sub = m.plan;
         if (!m.preset.empty()) {
             sub = m.preset + " preset  \xC2\xB7  " + sub;
         }
-        if (m.on_usb) {
-            sub = "On USB  \xC2\xB7  " + sub;
-        }
         ui::text(list, f.regular, f.regular.font->fit(sub, 18, 700), panel.x + 60, y + 58, 18, kInk.with_alpha(kMuted * ink));
         char size[24];
         std::snprintf(size, sizeof(size), "%.1f GiB", m.size_gib);
         ui::text(list, f.mono, size, panel.x + panel.w - 260, y + 44, 22, kInk.with_alpha(ink), gfx::Align::right);
-        if (m.import_progress >= 0) {
-            bar(list, { panel.x + panel.w - 200, y + 34, 140, 10 }, m.import_progress, kAmber);
-        } else {
-            const char * tag = m.current ? "LOADED" : m.on_usb ? "IMPORT" : m.fits ? "LOAD" : "TOO BIG";
-            const Color  tc  = m.current ? kCyan : m.on_usb ? kAmber : m.fits ? kLime : kRose;
-            caps(list, f, tag, panel.x + panel.w - 60, y + 44, 15, tc, gfx::Align::right);
-        }
+        const char * tag = m.current ? "LOADED" : m.fits ? "LOAD" : "TOO BIG";
+        const Color  tc  = m.current ? kCyan : m.fits ? kLime : kRose;
+        caps(list, f, tag, panel.x + panel.w - 60, y + 44, 15, tc, gfx::Align::right);
     }
     list.pop_opacity();
+}
+
+void Dashboard::open_library() {
+    library_open_ = true;
+    library_cursor_ = 0;
+    for (int i = 0; i < (int) live_.models.size(); ++i) {
+        if (live_.models[(size_t) i].current) {
+            library_cursor_ = i;
+        }
+    }
+    cursor_y_.snap((float) slot(library_cursor_));
+}
+
+// Rows come sorted by path, so internal (/data) ones precede USB (/mnt) ones;
+// each group gets a header line above it.
+int Dashboard::slot(int row) const {
+    int s = row + 1;
+    if (row > 0 && live_.models[(size_t) row].on_usb && !live_.models[0].on_usb) {
+        ++s;
+    }
+    return s;
 }
 
 void Dashboard::draw_hints(DashboardFrame & frame) const {
@@ -626,7 +644,7 @@ void Dashboard::draw_hints(DashboardFrame & frame) const {
     if (library_.value > 0.5f) {
         const bool on  = library_cursor_ < (int) live_.models.size();
         const ModelRow * m = on ? &live_.models[(size_t) library_cursor_] : nullptr;
-        const char * act = !m ? "Load" : m->current ? "Unload" : m->on_usb ? "Import" : "Load";
+        const char * act = !m ? "Load" : m->current ? "Unload" : "Load";
         const ui::Hint hints[] = { { ui::Button::dpad, "Choose" }, { ui::Button::cross, act }, { ui::Button::circle, "Back" } };
         ui::draw_hints(frame.overlay, fonts_, style, hints, 3, kGridX + kGridW, true);
     } else {

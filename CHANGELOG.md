@@ -7,6 +7,21 @@ v0.1.x are the upstream payload releases by cobanov.
 
 ## [Unreleased]
 
+### Added
+- Pages on L1/R1: Dashboard, Settings and Logs, with tabs in the header.
+- Settings page (rail and rows after the kit's Control Room design): load a
+  model at launch and which one, the planner's longest context and KV cache
+  type, interface sounds; saved to `/data/PS5LM/settings.json`.
+- Logs page: `app.log` and `llama.log`, scrollable, with an errors-only filter.
+- Model details on Cross over the Model tile: every llama-server argument, the
+  plan, cache and preset; Triangle opens the library.
+- THERMALS tile (SoC and CPU temperature, SoC power), STORAGE tile (free space
+  on /data and USB), and the CPU clock.
+
+### Changed
+- One MEMORY tile replaces MEMORY and GPU MEMORY (the GPU and CPU share one
+  pool); CONTEXT takes in the session counts.
+
 ## [0.2.0] - 2026-10-10
 
 First release of the native app (title PPSA99581), from this fork.

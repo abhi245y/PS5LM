@@ -221,7 +221,7 @@ const Preset * find_preset(const ModelInfo & m) {
     return nullptr;
 }
 
-Plan plan_model(const ModelInfo & m, double budget_gib, uint32_t ctx_cap) {
+Plan plan_model(const ModelInfo & m, double budget_gib, uint32_t ctx_cap, const char * kv_force) {
     Plan p;
     const Preset * preset = find_preset(m);
     if (preset && preset->max_ctx) {
@@ -245,8 +245,11 @@ Plan plan_model(const ModelInfo & m, double budget_gib, uint32_t ctx_cap) {
             continue;
         }
         for (const char * t : types) {
+            if (kv_force && std::strcmp(t, kv_force) != 0) {
+                continue;
+            }
             // f16 only where it is cheap: q8_0 costs nothing measurable in quality.
-            if (std::strcmp(t, "f16") == 0 && ctx > 8192) {
+            if (!kv_force && std::strcmp(t, "f16") == 0 && ctx > 8192) {
                 continue;
             }
             const double kv    = kv_bytes_per_token(m, t) * ctx / kGiB;

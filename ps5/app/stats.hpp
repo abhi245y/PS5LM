@@ -43,6 +43,9 @@ struct Live {
     uint32_t    ctx       = 0;
     std::string kv_type;
     double      kv_gib    = 0;
+    std::string model_file;              // full path
+    std::string plan;                    // the planner's line
+    std::vector<std::string> args;       // llama-server's arguments
 
     // Speed.
     float gen_tps    = 0;    // over the last generation interval
@@ -55,6 +58,18 @@ struct Live {
     float gpu_busy = 0;      // 0..1
     float cpu_use  = 0;      // 0..1 of the CPUs the app may use
     int   cpus     = 0;
+
+    // The console. Temperatures in degrees C, below -100 when unread; power
+    // in watts, 0 when unread; the CPU clock in GHz.
+    float soc_temp = -1000;
+    float cpu_temp = -1000;
+    float soc_power_w = 0;
+    float cpu_ghz = 0;
+    std::vector<float> temp_history;  // SoC degrees C per second
+
+    // Storage, GiB; usb_total 0 when no drive is mounted.
+    double data_free = 0, data_total = 0;
+    double usb_free  = 0, usb_total  = 0;
 
     // Memory, GiB.
     double pool_gib = 0;     // the title's direct memory

@@ -5,6 +5,7 @@
 #include <netinet/in.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
+#include <sys/statvfs.h>
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -20,6 +21,11 @@
 #include <ps5platform/kernel.h>
 extern "C" int scePthreadGetaffinity(void * thread, uint64_t * mask);
 extern "C" void * scePthreadSelf(void);
+// libkernel; signatures as Marice/ps5-exporter and the SDK's hwinfo sample use them.
+extern "C" int  sceKernelGetCpuTemperature(int * celsius);
+extern "C" int  sceKernelGetSocSensorTemperature(int sensor, int * celsius);
+extern "C" int  sceKernelGetSocPowerConsumption(uint64_t * out, double reserved);
+extern "C" long sceKernelGetCpuFrequency(void);
 #endif
 
 namespace ps5lm {
@@ -34,6 +40,17 @@ void push(std::vector<float> & v, float x) {
     if (v.size() > kHistory) {
         v.erase(v.begin());
     }
+}
+
+// Free and total GiB of the filesystem holding `path`, or zeros.
+void space(const char * path, double * free, double * total) {
+    struct statvfs v = {};
+    if (statvfs(path, &v) != 0 || v.f_blocks == 0) {
+        *free = *total = 0;
+        return;
+    }
+    *free  = (double) v.f_bavail * v.f_frsize / kGiB;
+    *total = (double) v.f_blocks * v.f_frsize / kGiB;
 }
 
 double now_s() {
@@ -156,6 +173,9 @@ void StatsCollector::set_model(const Live & m) {
     live_.ctx         = m.ctx;
     live_.kv_type     = m.kv_type;
     live_.kv_gib      = m.kv_gib;
+    live_.model_file  = m.model_file;
+    live_.plan        = m.plan;
+    live_.args        = m.args;
 }
 
 void StatsCollector::set_models(const std::vector<ModelRow> & rows) {
@@ -206,8 +226,45 @@ void StatsCollector::run() {
         heap = hs.mapped_bytes / kGiB;
 #endif
 
+        float soc_t = -1000, cpu_t = -1000, watts = 0, ghz = 0;
+#ifdef __PROSPERO__
+        int t = 0;
+        if (sceKernelGetSocSensorTemperature(0, &t) == 0 && t > -100 && t < 200) {
+            soc_t = (float) t;
+        }
+        if (sceKernelGetCpuTemperature(&t) == 0 && t > -100 && t < 200) {
+            cpu_t = (float) t;
+        }
+        // The unit is not documented; milliwatts is the community reading,
+        // so only plausible values are shown.
+        uint64_t raw[16] = {};
+        if (sceKernelGetSocPowerConsumption(raw, 0.0) == 0 && raw[0] >= 1000 && raw[0] <= 350000) {
+            watts = (float) (raw[0] / 1000.0);
+        }
+        const long hz = sceKernelGetCpuFrequency();
+        ghz = hz > 0 ? (float) (hz / 1e9) : 0.0f;
+#endif
+        double data_free = 0, data_total = 0, usb_free = 0, usb_total = 0;
+        space("/data", &data_free, &data_total);
+        // An empty /mnt/usb0 is a directory of the root filesystem, not a drive.
+        struct statvfs usb = {}, mnt = {};
+        if (statvfs("/mnt/usb0", &usb) == 0 && statvfs("/mnt", &mnt) == 0 && usb.f_fsid != mnt.f_fsid) {
+            space("/mnt/usb0", &usb_free, &usb_total);
+        }
+
         std::lock_guard<std::mutex> lock(mutex_);
         const double dt = wall - last_wall;
+        live_.soc_temp = soc_t;
+        live_.cpu_temp = cpu_t;
+        live_.soc_power_w = watts;
+        live_.cpu_ghz = ghz;
+        if (soc_t > -100) {
+            push(live_.temp_history, soc_t);
+        }
+        live_.data_free = data_free;
+        live_.data_total = data_total;
+        live_.usb_free = usb_free;
+        live_.usb_total = usb_total;
         live_.uptime_s = wall - start;
         live_.pool_gib = pool;
         live_.free_gib = free;

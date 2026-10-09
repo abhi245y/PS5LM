@@ -64,6 +64,20 @@ ps5lm::Live sample(float seconds, bool generating) {
     L.ctx         = 65536;
     L.kv_type     = "q4_0";
     L.kv_gib      = 1.13;
+    L.model_file  = "/data/PS5LM/models/Qwen3.8-27B-UD-Q2_K_XL.gguf";
+    L.plan        = "64k context, q4_0 cache: 11.3 of 11.4 GiB";
+    L.args = { "-m", L.model_file, "-ngl", "999", "-fit", "off", "-lm", "none", "-c", "65536", "-fa", "on",
+               "-ctk", "q4_0", "-ctv", "q4_0", "-b", "256", "-ub", "64", "-np", "1", "-ctxcp", "1", "-cram", "0",
+               "--host", "0.0.0.0", "--port", "8081", "--temp", "0.6", "--top-p", "0.95", "--top-k", "20",
+               "--min-p", "0", "--metrics" };
+    L.soc_temp    = 61;
+    L.cpu_temp    = 54;
+    L.soc_power_w = 118;
+    L.cpu_ghz     = 3.5f;
+    L.data_free   = 412;
+    L.data_total  = 825;
+    L.usb_free    = 455;
+    L.usb_total   = 477;
     L.pool_gib    = 11.44;
     L.free_gib    = 0.31;
     L.heap_gib    = 0.76;
@@ -80,6 +94,7 @@ ps5lm::Live sample(float seconds, bool generating) {
         L.gen_history.push_back(tps);
         L.gpu_history.push_back(on ? 0.92f + 0.05f * std::sin(i * 0.3f) : 0.03f);
         L.cpu_history.push_back(on ? 0.11f + 0.03f * std::sin(i * 0.5f) : 0.02f);
+        L.temp_history.push_back(on ? 60.0f + 2.0f * std::sin(i * 0.2f) : 52.0f);
     }
     L.gen_tps  = generating ? 20.7f : 0.0f;
     L.gpu_busy = generating ? 0.94f : 0.02f;
@@ -161,6 +176,18 @@ int main(int argc, char ** argv) {
 
     hui::save::ensure_directory(out);
     ps5lm::Dashboard dash(fonts);
+    ps5lm::Settings settings;
+    settings.default_model = "/data/PS5LM/models/Qwen3.8-27B-UD-Q2_K_XL.gguf";
+    dash.set_settings(settings);
+    std::vector<std::string> app_log, llama_log;
+    for (int i = 0; i < 60; ++i) {
+        app_log.push_back("[ps5-present-perf] calls=2500 failures=0 warmup_frames=30 idle_ms=0.000898 flip_ms=0.000889");
+        app_log.push_back("ps5lm-app: model Qwen3.8-27B-UD-IQ2_XXS.gguf (qwen35): 64k context, q8_0 cache: 9.9 of 11.0 GiB");
+        llama_log.push_back("7.15.902.312 I slot print_timing: id  0 | task 646 | n_gen =    162, tg =  20.44 t/s");
+    }
+    app_log.push_back("ps5lm-app: accept failed, errno 53");
+    app_log.push_back("W srv          stop: cancel task, id_task = 22182");
+    dash.set_logs(app_log, llama_log);
     std::vector<unsigned char> pixels((size_t) W * H * 4);
     stbi_flip_vertically_on_write(1);
     hui::ui::Feedback feedback;
@@ -225,6 +252,8 @@ int main(int argc, char ** argv) {
     step(40, nav(hui::Direction::down), false);
     shot("02-model-focus");
     step(60, press(hui::Action::confirm), false);
+    shot("03-details");
+    step(60, press(hui::Action::north), false);
     shot("03-library");
     step(30, nav(hui::Direction::up), false);
     shot("04-library-choose");
@@ -232,5 +261,19 @@ int main(int argc, char ** argv) {
         step(25, nav(hui::Direction::down), false);
     }
     shot("05-library-usb");
+    step(30, press(hui::Action::back), false);
+    step(40, press(hui::Action::page_next), false);
+    shot("06-settings");
+    step(20, press(hui::Action::confirm), false);
+    step(30, nav(hui::Direction::down), false);
+    shot("07-settings-row");
+    step(20, press(hui::Action::back), false);
+    step(20, nav(hui::Direction::down), false);
+    step(30, press(hui::Action::confirm), false);
+    shot("08-settings-model");
+    step(40, press(hui::Action::page_next), false);
+    shot("09-logs");
+    step(30, press(hui::Action::north), false);
+    shot("10-logs-errors");
     return ok ? 0 : 1;
 }

@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- PS5LM launcher icon: a chat bubble on a GPU die, in the project site's
+       colours (bg #0e0e14, accent #8288f0). Rendered by scripts/build-assets.sh. -->
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="46%" r="62%">
+      <stop offset="0" stop-color="#2a2b52"/>
+      <stop offset="0.55" stop-color="#15151f"/>
+      <stop offset="1" stop-color="#0b0b10"/>
+    </radialGradient>
+    <linearGradient id="bubble" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a9adff"/>
+      <stop offset="1" stop-color="#6b71e6"/>
+    </linearGradient>
+    <linearGradient id="die" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d1e2c"/>
+      <stop offset="1" stop-color="#14141d"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#glow)"/>
+  <!-- traces leaving the die -->
+  <g stroke="#8288f0" stroke-opacity="0.28" stroke-width="5" fill="none" stroke-linecap="round">
+    <path d="M136 176 H70 V120"/>  <path d="M136 226 H40"/>
+    <path d="M136 286 H60 V350"/>  <path d="M136 336 H96 V420"/>
+    <path d="M376 176 H446 V96"/>  <path d="M376 236 H472"/>
+    <path d="M376 296 H430 V372"/> <path d="M376 346 H410 V440"/>
+    <path d="M196 116 V48 H150"/>  <path d="M256 116 V36"/>  <path d="M316 116 V60 H372"/>
+    <path d="M216 396 V470"/>      <path d="M296 396 V452 H350"/>
+  </g>
+  <g fill="#8288f0" fill-opacity="0.45">
+    <circle cx="70" cy="120" r="8"/> <circle cx="40" cy="226" r="8"/> <circle cx="60" cy="350" r="8"/>
+    <circle cx="96" cy="420" r="8"/> <circle cx="446" cy="96" r="8"/> <circle cx="472" cy="236" r="8"/>
+    <circle cx="430" cy="372" r="8"/> <circle cx="410" cy="440" r="8"/> <circle cx="150" cy="48" r="8"/>
+    <circle cx="256" cy="36" r="8"/> <circle cx="372" cy="60" r="8"/> <circle cx="216" cy="470" r="8"/>
+    <circle cx="350" cy="452" r="8"/>
+  </g>
+  <!-- the die -->
+  <rect x="136" y="116" width="240" height="280" rx="30" fill="url(#die)" stroke="#8288f0" stroke-opacity="0.55" stroke-width="4"/>
+  <!-- the chat bubble -->
+  <path d="M182 168 h148 a34 34 0 0 1 34 34 v84 a34 34 0 0 1 -34 34 h-72 l-46 40 v-40 h-30 a34 34 0 0 1 -34 -34 v-84 a34 34 0 0 1 34 -34 z"
+        fill="url(#bubble)"/>
+  <!-- tokens being generated -->
+  <g fill="#0e0e14">
+    <rect x="190" y="208" width="132" height="16" rx="8"/>
+    <rect x="190" y="240" width="96"  height="16" rx="8"/>
+    <rect x="190" y="272" width="56"  height="16" rx="8"/>
+    <rect x="254" y="270" width="7"   height="20" rx="2" fill="#f2f2f7"/>
+  </g>
+</svg>

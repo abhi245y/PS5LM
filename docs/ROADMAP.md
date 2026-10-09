@@ -45,7 +45,8 @@ Decoding is bound by memory bandwidth: tokens per second ≈ effective bandwidth
 - [x] Safe CPU defaults for the PS5 (`patches/0001`): threads = allowed CPUs minus two, no busy-waiting
 - [x] `llama-server` on the console with a chat page in the PS5's own browser (`scripts/ps5-chat.sh`, `ps5/webui`); phones and laptops use the same page on port 8081
 - [ ] `llama-bench` numbers for the small model
-- [ ] **First light: Qwen3.8-27B generates text on the PS5.** UD-Q2_K_XL if Phase 0 says it fits, UD-IQ2_XXS if not. A video of it, posted with the repo.
+- [x] **First light: Qwen3.8-27B generates text on the PS5** (2026-10-09). UD-IQ1_S (5.77 GiB) in a payload, mapped from `/data` and paged in from the SSD, so about one token a minute (`-fit off`: llama.cpp's fit step asks for one 525 MB block a payload cannot get). The GPU app below is the real result.
+- [ ] A video of it, posted with the repo.
 
 Expect 1 to 3 tok/s here. Slow, but it is Qwen 3.8 running on a PS5, and the claim we want first.
 
@@ -77,13 +78,14 @@ An Ollama-like way to get models and chat, without a PC in the loop. One payload
 
 The route: ggml's Vulkan backend on [Mihawk-99's PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan), whose RADV driver (Mesa 26.2 from [PS5_Mesa](https://github.com/mihawk-99/PS5_Mesa), on a PS5 winsys over the console's AGC functions) reports Vulkan 1.4 and compiles shaders with ACO on the console. llama.cpp keeps its own kernels, so every model and quant comes along. RADV has everything ggml-vulkan requires but no cooperative matrix and no accelerated integer dot product, so matrix products take the fp16 shaders ([RESEARCH.md](RESEARCH.md)).
 
-- [ ] Build RADV: `tools/setup-native-dependencies.sh`, then `tools/build-radv.sh release` in PS5_Vulkan (CachyOS or Arch is the tested host; an Arch machine in OrbStack avoids an untested Ubuntu). Output: `libvulkan_radeon.ps5.a`
-- [ ] App shell: `eboot.bin` with `sce_sys/param.json`, from [ps5-native-app-boilerplate](https://github.com/blackbearreloaded/ps5-native-app-boilerplate), mounted by ShadowMountPlus, jailbroken at start through the HEN request PS5SX2 uses (the title ID must be on etaHEN's allowlist)
-- [ ] ggml-vulkan cross-compiled, its shaders compiled to SPIR-V on the host, linked as `tools/radv-link.sh` does (`--whole-archive`, `--defsym` for the `vk*` entry points ggml calls directly)
+- [x] Build RADV: `tools/setup-native-dependencies.sh`, then `tools/build-radv.sh release` in PS5_Vulkan. Built on Fedora 44 (needs `spirv-tools-devel` and the LLVM, Clang, libclc and SPIR-V translator development packages). Output: `libvulkan_radeon.ps5.a`; its smoke title passed 101 of 102 checks on the console (the miss is a display mode)
+- [x] App shell: `eboot.bin` with `sce_sys/param.json` (PPSA99581), linked as PS5_Vulkan's titles are, mounted by ShadowMountPlus from `/data/homebrew`. No jailbreak request needed: the title reads `/data/PS5LM` and serves on the network as it is (`scripts/build-app.sh`, `ps5/app`)
+- [x] ggml-vulkan cross-compiled, its shaders compiled to SPIR-V on the host, linked as `tools/radv-link.sh` does. No Vulkan loader: `vkGetInstanceProcAddr` forwards to RADV's ICD entry point, and the three commands ggml calls by name go to Mesa's `vk_common_*`
 - [ ] `test-backend-ops` on the console: every op the `qwen35` graph uses matches the CPU
 - [ ] Prompt processing in small batches: a submit that makes no progress for 10 s loses the device, and Gated DeltaNet loops over every token of a batch in one dispatch
-- [ ] Weights in device memory. RADV's heaps come out of one direct memory pool of about 12 GiB, shared with the CPU side, so UD-IQ2_XXS (6.77 GiB) before UD-Q2_K_XL
-- [ ] Qwen3.8-27B decoding on the GPU, target 15 tok/s or more
+- [x] Weights in device memory: with `radv_enable_unified_heap_on_apu` RADV reports one 11.44 GiB device heap over the title's 12 GiB direct memory (2/3 of it by default). UD-IQ2_XXS (6.77 GiB) loads in 82 s
+- [ ] UD-Q2_K_XL (9.15 GiB) on the GPU
+- [x] Qwen3.8-27B decoding on the GPU (2026-10-09): 21 tok/s on a short prompt, 9 tok/s in the web UI, prompts at 35 to 50 tok/s, through llama-server on port 8081
 
 **Done when** the GPU decodes at least five times faster than the CPU.
 

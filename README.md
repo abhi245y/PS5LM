@@ -11,6 +11,8 @@
 The first target is **Qwen 3.8** (27B, hybrid Gated DeltaNet attention), the newest open Qwen. No one has run it on a PS5 yet.
 
 > **Status:** v0.1 is out. One payload, `ps5lm.elf`, opens a model library in the PS5's browser: download a model on the console, run it, chat. Small models for now (up to 1.6 GB, Qwen3.5 0.8B and 2B). See [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/CONSOLE.md](docs/CONSOLE.md).
+>
+> **New: Qwen 3.8 27B on the GPU.** A native app (`ps5/app`) runs llama.cpp's Vulkan backend on Mihawk-99's RADV port with the console's 12 GiB of direct memory: Qwen3.8-27B UD-IQ2_XXS answers at 9 to 21 tok/s, chat at `http://<console IP>:8081`. Built from source for now (below).
 
 ## Install
 
@@ -40,6 +42,7 @@ Earlier PS5 LLM work hand-writes GPU kernels for one model at a time. PS5LM port
 |---|---|
 | `third_party/llama.cpp` | upstream llama.cpp, pinned as a submodule |
 | `ps5/compat` | the few libc functions the console lacks |
+| `ps5/app` | the native app: llama-server on the GPU through RADV, its icon and `param.json` |
 | `patches/` | PS5 changes to llama.cpp's source, kept small |
 | `probes/` | `memprobe` and `threadprobe`: what a payload gets on the console |
 | `scripts/` | SDK setup, the llama.cpp cross build, sending payloads |
@@ -84,6 +87,17 @@ With [ftpsrv](https://github.com/ps5-payload-dev/ftpsrv) running too (port 2121)
 scripts/run.sh llama-cli -m /data/PS5LM/models/model.gguf -p "Hello from a PS5" -n 64
 scripts/run.sh llama-server -m /data/PS5LM/models/model.gguf --host 0.0.0.0 --port 8081
 ```
+
+## The GPU app
+
+The app links llama.cpp with ggml-vulkan against [PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan)'s RADV build. Set up PS5_Vulkan and its forks in `.deps/src` (`PS5_Vulkan`, `PS5_Mesa` and `PS5_PayloadSDK` at the revisions PS5_Vulkan pins), then:
+
+```sh
+(cd .deps/src/PS5_Vulkan && tools/setup-native-dependencies.sh && tools/build-radv.sh release && make app)
+scripts/build-app.sh             # build/app-ps5/title/PPSA99581
+```
+
+Copy `build/app-ps5/title/PPSA99581` to `/data/homebrew/PPSA99581` and the model to `/data/PS5LM/models`, then start **PS5LM** from the home screen. The screen stays black; after about 90 s the chat is at `http://<console IP>:8081`. Its arguments come from `/data/PS5LM/app-args.txt` (one per line) and its log goes to `/data/PS5LM/app.log` and `llama.log`.
 
 ## Credits
 

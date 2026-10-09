@@ -1,0 +1,3 @@
+#!/bin/sh
+# C compiler for the native app build (ps5/app/toolchain.cmake).
+PS5_CLANG=${PS5_CLANG_C:-clang} exec sh "$PS5_VULKAN_ROOT/tooling/prospero-clang18" "$@"

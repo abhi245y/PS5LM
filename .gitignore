@@ -13,3 +13,6 @@ models/
 
 .DS_Store
 .wrangler/
+
+# the app's home screen backgrounds, made from ps5/app/sce_sys/source by scripts/build-app.sh
+ps5/app/sce_sys/*.dds

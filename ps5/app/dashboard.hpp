@@ -54,7 +54,7 @@ class Dashboard {
     // What the user asked for, once: load or unload a model, or the settings
     // changed (read them with settings()).
     struct Request {
-        enum Kind { none, load, unload, settings } kind = none;
+        enum Kind { none, load, unload, settings, clear_scratch } kind = none;
         std::string path;
     };
     Request take_request() {

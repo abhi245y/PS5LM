@@ -30,6 +30,8 @@ struct ModelInfo {
     uint32_t    n_ctx_train     = 0;
     uint32_t    n_expert        = 0;   // 0: dense
     uint64_t    state_bytes     = 0;   // recurrent state, all layers (f32)
+    std::string mmproj;                // a vision projector beside the model, or empty
+    uint64_t    mmproj_bytes    = 0;
     bool        ok              = false;
     std::string error;
 
@@ -37,6 +39,9 @@ struct ModelInfo {
 };
 
 // Reads the metadata of a GGUF file (not its tensors).
+// The vision projector ("mmproj") beside a model, or empty.
+std::string find_mmproj(const std::string & model_path);
+
 ModelInfo read_model_info(const std::string & path);
 
 // Bytes of KV cache per token of context, for a cache type ("f16", "q8_0", "q4_0").

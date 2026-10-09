@@ -163,7 +163,7 @@ constexpr const char * kPageNames[Dashboard::kPages] = { "Dashboard", "Settings"
 
 // ---- Settings: categories of rows, after the kit's "Control Room" ---------------
 
-enum class Setting : int { auto_load, default_model, ctx_cap, kv_type, sounds };
+enum class Setting : int { auto_load, default_model, ctx_cap, kv_type, sounds, tools, scratch_limit, clear_scratch };
 
 struct SettingRow {
     Setting      id;
@@ -174,7 +174,7 @@ struct SettingRow {
 struct SettingCategory {
     const char *     name;
     const char *     about;
-    SettingRow       rows[2];
+    SettingRow       rows[4];
     int              count;
 };
 
@@ -187,11 +187,16 @@ constexpr SettingCategory kCategories[] = {
       { { Setting::ctx_cap, "Longest context", "The planner picks the longest context up to this that fits." },
         { Setting::kv_type, "KV cache", "Auto picks the best that fits; a fixed type trades context for quality." } },
       2 },
+    { "Chat", "The browser chat's tools, and the folder they work in.",
+      { { Setting::tools, "File tools", "The model may read, write and search files in /data/PS5LM/scratch. Applies at the next load." },
+        { Setting::scratch_limit, "Warn above", "A notification when the scratch folder grows past this." },
+        { Setting::clear_scratch, "Clear the scratch folder", "Deletes everything the chat's tools wrote." } },
+      3 },
     { "App", "The app itself.",
       { { Setting::sounds, "Sounds", "Interface sounds on the TV." } },
       1 },
 };
-constexpr int kCategoryCount = 3;
+constexpr int kCategoryCount = 4;
 
 constexpr uint32_t     kCtxSteps[] = { 4096, 8192, 16384, 32768, 65536, 131072 };
 constexpr const char * kKvSteps[] = { "auto", "f16", "q8_0", "q4_0" };
@@ -374,11 +379,20 @@ std::string setting_text(const Settings & s, Setting id, const std::vector<Model
             std::snprintf(t, sizeof(t), "%uk tokens", s.ctx_cap / 1024);
             return t;
         case Setting::kv_type: return s.kv_type == "auto" ? "Auto" : s.kv_type;
+        case Setting::scratch_limit:
+            std::snprintf(t, sizeof(t), "%u GiB", s.scratch_limit_gib);
+            return t;
         default: return "";
     }
 }
 
-bool is_toggle(Setting id) { return id == Setting::auto_load || id == Setting::sounds; }
+bool is_toggle(Setting id) { return id == Setting::auto_load || id == Setting::sounds || id == Setting::tools; }
+
+bool toggle_value(const Settings & s, Setting id) {
+    return id == Setting::auto_load ? s.auto_load : id == Setting::sounds ? s.sounds : s.tools;
+}
+
+constexpr uint32_t kScratchSteps[] = { 1, 2, 5, 10, 20 };
 
 // Moves a stepper one place; false at either end.
 bool step_setting(Settings & s, Setting id, int dir, const std::vector<ModelRow> & models) {
@@ -430,8 +444,23 @@ bool step_setting(Settings & s, Setting id, int dir, const std::vector<ModelRow>
             s.kv_type = kKvSteps[at + dir];
             return true;
         }
+        case Setting::scratch_limit: {
+            int at = 1;
+            for (int i = 0; i < 5; ++i) {
+                if (kScratchSteps[i] == s.scratch_limit_gib) {
+                    at = i;
+                }
+            }
+            if (at + dir < 0 || at + dir >= 5) {
+                return false;
+            }
+            s.scratch_limit_gib = kScratchSteps[at + dir];
+            return true;
+        }
         case Setting::auto_load: s.auto_load = !s.auto_load; return true;
         case Setting::sounds: s.sounds = !s.sounds; return true;
+        case Setting::tools: s.tools = !s.tools; return true;
+        case Setting::clear_scratch: return false;
     }
     return false;
 }
@@ -467,6 +496,17 @@ void Dashboard::update_settings(const hui::InputFrame & input, ui::Feedback & fe
         }
     }
     const Setting id = c.rows[setting_row_].id;
+    if (id == Setting::clear_scratch) {
+        if (input.is_pressed(Action::confirm)) {
+            request_ = { Request::clear_scratch, "" };
+            feedback.play(hui::audio::Cue::saved);
+        }
+        if (input.is_pressed(Action::back)) {
+            in_rows_ = false;
+            feedback.play(hui::audio::Cue::back);
+        }
+        return;
+    }
     int dir = 0;
     if (input.nav == Direction::left || input.nav == Direction::right) {
         dir = input.nav == Direction::right ? 1 : -1;
@@ -477,7 +517,7 @@ void Dashboard::update_settings(const hui::InputFrame & input, ui::Feedback & fe
     if (dir != 0) {
         if (is_toggle(id) && (input.nav == Direction::left || input.nav == Direction::right)) {
             // Left turns a switch off, right on; the other way refuses.
-            const bool on = id == Setting::auto_load ? settings_.auto_load : settings_.sounds;
+            const bool on = toggle_value(settings_, id);
             if (on == (dir > 0)) {
                 if (!input.nav_repeat) {
                     feedback.play(hui::audio::Cue::error, 1.0f, 0.0f, 0.6f);
@@ -1127,7 +1167,7 @@ void Dashboard::draw_settings(gfx::DrawList & list) const {
                  kInk.with_alpha(focused ? 1.0f : 0.84f));
         const float right = row.x + row.w - 28;
         if (is_toggle(sr.id)) {
-            const bool on = sr.id == Setting::auto_load ? settings_.auto_load : settings_.sounds;
+            const bool on = toggle_value(settings_, sr.id);
             const Rect pill{ right - 84, row.cy() - 22, 84, 44 };
             if (focused) {
                 list.glow(pill, 22, 12, kCyan.with_alpha(on ? 0.45f : 0.18f));
@@ -1138,6 +1178,15 @@ void Dashboard::draw_settings(gfx::DrawList & list) const {
             list.rounded_rect(thumb, 17, on ? kPanelBottom : kInk);
             ui::text(list, f.regular, on ? "On" : "Off", pill.x - 20, row.cy() + 8, 24,
                      kInk.with_alpha(focused ? 0.95f : 0.66f), gfx::Align::right);
+        } else if (sr.id == Setting::clear_scratch) {
+            // An action row: what it would delete, and a chevron.
+            char t[48];
+            std::snprintf(t, sizeof(t), "%.2f GiB in the folder", live_.scratch_gib);
+            ui::text(list, f.regular, t, right - 34, row.cy() + 8, 24, kInk.with_alpha(focused ? 0.8f : 0.55f),
+                     gfx::Align::right);
+            const Color ink = focused ? kRose : kInk.with_alpha(0.6f);
+            list.line(right - 12, row.cy() - 9, right - 3, row.cy(), 3.0f, ink);
+            list.line(right - 12, row.cy() + 9, right - 3, row.cy(), 3.0f, ink);
         } else {
             // A stepper: the value between two triangles, dimmed at the ends.
             const float w = 420, cx = right - w * 0.5f;
@@ -1231,13 +1280,14 @@ void Dashboard::draw_hints(DashboardFrame & frame) const {
         const ui::Hint hints[] = { { ui::Button::triangle, "Library" }, { ui::Button::circle, "Back" } };
         ui::draw_hints(frame.overlay, fonts_, style, hints, 2, kGridX + kGridW, true);
     } else if (page_ == 1) {
-        const bool toggle = in_rows_ && is_toggle(kCategories[setting_category_].rows[setting_row_].id);
+        const Setting row_id = kCategories[setting_category_].rows[setting_row_].id;
+        const bool toggle = in_rows_ && (is_toggle(row_id) || row_id == Setting::clear_scratch);
         if (!in_rows_) {
             const ui::Hint hints[] = { { ui::Button::dpad, "Choose" }, { ui::Button::cross, "Open" } };
             ui::draw_hints(frame.scene, fonts_, style, hints, 2, kGridX + kGridW, true);
         } else {
             const ui::Hint hints[] = { { ui::Button::dpad, "Change" },
-                                       { ui::Button::cross, toggle ? "Switch" : "" },
+                                       { ui::Button::cross, row_id == Setting::clear_scratch ? "Clear" : "Switch" },
                                        { ui::Button::circle, "Back" } };
             const ui::Hint plain[] = { { ui::Button::dpad, "Change" }, { ui::Button::circle, "Back" } };
             ui::draw_hints(frame.scene, fonts_, style, toggle ? hints : plain, toggle ? 3 : 2, kGridX + kGridW, true);

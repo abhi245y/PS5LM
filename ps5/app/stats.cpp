@@ -183,6 +183,11 @@ void StatsCollector::set_models(const std::vector<ModelRow> & rows) {
     live_.models = rows;
 }
 
+void StatsCollector::set_scratch(double gib) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    live_.scratch_gib = gib;
+}
+
 void StatsCollector::set_state(ServerState s) {
     std::lock_guard<std::mutex> lock(mutex_);
     live_.state = s;

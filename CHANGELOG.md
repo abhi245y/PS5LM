@@ -18,6 +18,13 @@ v0.1.x are the upstream payload releases by cobanov.
 - THERMALS tile (SoC and CPU temperature, SoC power), STORAGE tile (free space
   on /data and USB), and the CPU clock.
 
+- Chat tools: the browser chat's model can read, write, edit and search files
+  (llama-server's built-in tools), confined to `/data/PS5LM/scratch` by
+  `patches/0003-tools-root.patch`. Settings has a switch, a size warning
+  (default 2 GiB) and a Clear action.
+- Images: a vision model's `mmproj` file beside it is loaded with it
+  (`--mmproj`), and the planner counts its memory.
+
 ### Changed
 - One MEMORY tile replaces MEMORY and GPU MEMORY (the GPU and CPU share one
   pool); CONTEXT takes in the session counts.

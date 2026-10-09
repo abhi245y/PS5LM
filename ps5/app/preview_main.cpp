@@ -271,6 +271,12 @@ int main(int argc, char ** argv) {
     step(20, nav(hui::Direction::down), false);
     step(30, press(hui::Action::confirm), false);
     shot("08-settings-model");
+    step(20, press(hui::Action::back), false);
+    step(20, nav(hui::Direction::down), false);
+    step(20, press(hui::Action::confirm), false);
+    step(20, nav(hui::Direction::down), false);
+    step(30, nav(hui::Direction::down), false);
+    shot("08-settings-chat");
     step(40, press(hui::Action::page_next), false);
     shot("09-logs");
     step(30, press(hui::Action::north), false);

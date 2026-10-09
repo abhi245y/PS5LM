@@ -23,6 +23,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <span>
@@ -97,6 +98,9 @@ constexpr const char * kArgs        = "/data/PS5LM/app-args.txt";
 constexpr const char * kChoice      = "/data/PS5LM/model.txt";
 constexpr const char * kQuit        = "/data/PS5LM/quit";
 constexpr const char * kSettings    = "/data/PS5LM/settings.json";
+constexpr const char * kScratch     = "/data/PS5LM/scratch";
+// The file tools only: a title cannot start processes (no shell command).
+constexpr const char * kTools       = "read_file,write_file,edit_file,file_glob_search,grep_search,get_info";
 constexpr const char * kLlamaLog    = "/data/PS5LM/llama.log";
 constexpr const char * kModels      = "/data/PS5LM/models";
 constexpr const char * kAssets      = "/app0/assets";
@@ -123,6 +127,19 @@ std::vector<std::string> tail_lines(const char * path) {
         lines.emplace_back(text, start, end - start);
     }
     return lines;
+}
+
+// Bytes under a folder, or 0.
+uint64_t folder_bytes(const char * path) {
+    std::error_code ec;
+    uint64_t total = 0;
+    for (auto it = std::filesystem::recursive_directory_iterator(path, ec);
+         !ec && it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
+        if (it->is_regular_file(ec)) {
+            total += it->file_size(ec);
+        }
+    }
+    return total;
 }
 
 // A system notification on the TV.
@@ -342,6 +359,15 @@ struct Models {
         if (std::find(args.begin(), args.end(), "--metrics") == args.end()) {
             args.push_back("--metrics");
         }
+        // The browser chat's file tools, confined to the scratch folder by
+        // patches/0003 (LLAMA_TOOLS_ROOT) and working there by default.
+        if (settings.tools && std::find(args.begin(), args.end(), "--tools") == args.end()) {
+            std::error_code ec;
+            std::filesystem::create_directories(kScratch, ec);
+            setenv("LLAMA_TOOLS_ROOT", kScratch, 1);
+            chdir(kScratch);
+            args.insert(args.end(), { "--tools", kTools });
+        }
         for (const auto & a : args) {
             std::printf("ps5lm-app: arg %s\n", a.c_str());
         }
@@ -502,6 +528,7 @@ int main(int, char **) {
     Dashboard dash(fonts);
     dash.set_settings(models.settings);
     bool      library_shown = false;  // opened once at launch when no model is loaded
+    bool      scratch_warned = false;
     DashboardFrame frame;
     hui::ui::Feedback feedback;
     hui::PadSample samples[64];
@@ -547,6 +574,19 @@ int main(int, char **) {
         }
         pad.tick(dt);
 
+        // The scratch folder: its size for the dashboard, and one warning each
+        // time it grows past the limit.
+        if (n % 600 == 300) {
+            const double gib = folder_bytes(kScratch) / 1073741824.0;
+            stats.set_scratch(gib);
+            const bool over = gib > models.settings.scratch_limit_gib;
+            if (over && !scratch_warned) {
+                char text[128];
+                std::snprintf(text, sizeof(text), "PS5LM: the chat's scratch folder holds %.1f GiB; clear it in Settings", gib);
+                notify(text);
+            }
+            scratch_warned = over;
+        }
         if (dash.page() == Dashboard::kLogsPage && n % 60 == 0) {
             dash.set_logs(tail_lines(kLog), tail_lines(kLlamaLog));
         }
@@ -559,6 +599,15 @@ int main(int, char **) {
             save_settings(kSettings, models.settings);
             models.scan(stats);
             std::printf("ps5lm-app: settings saved\n");
+        }
+        if (req.kind == Dashboard::Request::clear_scratch) {
+            std::error_code ec;
+            for (const auto & e : std::filesystem::directory_iterator(kScratch, ec)) {
+                std::filesystem::remove_all(e.path(), ec);
+            }
+            stats.set_scratch(folder_bytes(kScratch) / 1073741824.0);
+            notify("PS5LM: scratch folder cleared");
+            std::printf("ps5lm-app: scratch folder cleared\n");
         }
         // The same requests from the PC (scripts/ps5lm-app.sh load|unload).
         if (n % 60 == 30 && req.kind == Dashboard::Request::none) {

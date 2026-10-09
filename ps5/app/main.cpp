@@ -39,6 +39,7 @@
 #include "ggml-backend.h"
 #include "model_plan.hpp"
 #include "stats.hpp"
+#include "version.hpp"
 
 #include <ps5platform/heap.h>
 #include <ps5platform/kernel.h>
@@ -333,7 +334,17 @@ struct Models {
             return;
         }
         llama_server_terminate();
-        pthread_join(server, nullptr);
+        // With a reply in flight llama-server can stay inside its HTTP thread
+        // pool forever (unload during generation hung the app). We are about
+        // to be replaced by LoadExec anyway, so wait 10 s at most.
+        for (int i = 0; i < 100 && g_server_rc < 0; ++i) {
+            usleep(100 * 1000);
+        }
+        if (g_server_rc >= 0) {
+            pthread_join(server, nullptr);
+        } else {
+            std::printf("ps5lm-app: llama_server did not return in 10 s; restarting anyway\n");
+        }
         server_started = false;
         running.clear();
         log_memory("after unloading");
@@ -362,6 +373,7 @@ int main(int, char **) {
     if (std::freopen(kLog, "a", stderr) != nullptr) {
         setvbuf(stderr, nullptr, _IONBF, 0);
     }
+    std::printf("ps5lm-app: version " PS5LM_VERSION "\n");
     // One device-local heap over the whole pool (RADV splits an APU's 2/3 to
     // 1/3), and a HOME for llama.cpp, which throws without one.
     setenv("radv_enable_unified_heap_on_apu", "true", 1);

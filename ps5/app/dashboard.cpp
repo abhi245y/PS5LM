@@ -4,6 +4,7 @@
 // ps5-homebrew-ui's src/concepts/dashboard.cpp ("Pulse Dashboard",
 // BlackBearReloaded, GPL-3.0-or-later); the tiles and their data are PS5LM's.
 #include "dashboard.hpp"
+#include "version.hpp"
 
 #include "ui/glyphs.hpp"
 
@@ -537,7 +538,7 @@ void Dashboard::draw_header(gfx::DrawList & list) const {
     list.push_opacity(in);
     const float y = 124 - 10.0f * (1.0f - in);
     const float w = ui::text(list, fonts_.display, "PS5LM", kGridX - 3, y, 56, kInk);
-    std::string sub = "Chat at " + live_.address;
+    std::string sub = "v" PS5LM_VERSION "  \xC2\xB7  Chat at " + live_.address;
     ui::text(list, fonts_.regular, sub, kGridX + w + 24, y, 24, kInk.with_alpha(kMuted));
 
     const char * word  = state_word(live_.state);

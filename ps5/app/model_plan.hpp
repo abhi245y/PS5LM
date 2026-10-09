@@ -39,6 +39,11 @@ struct ModelInfo {
 };
 
 // Reads the metadata of a GGUF file (not its tensors).
+// The same from the first bytes of a GGUF file (a range request to a model
+// host), with the whole file's size: enough to plan before downloading.
+// Fetch enough to hold the metadata (16 MiB covers large vocabularies).
+ModelInfo read_model_header(const std::string & name, const std::string & head, uint64_t file_bytes);
+
 // The vision projector ("mmproj") beside a model, or empty.
 std::string find_mmproj(const std::string & model_path);
 

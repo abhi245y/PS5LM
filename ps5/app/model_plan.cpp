@@ -129,13 +129,16 @@ std::string find_mmproj(const std::string & model_path) {
     return best;
 }
 
-ModelInfo read_model_info(const std::string & path) {
+namespace {
+
+// Reads a GGUF header from `f` (and closes it). `file_bytes` is the whole
+// file's size when `f` holds only its start; 0 to measure `f`.
+ModelInfo parse_model_info(FILE * f, const std::string & path, uint64_t file_bytes) {
     ModelInfo m;
     m.path      = path;
     m.file_name = path.substr(path.find_last_of('/') + 1);
     m.name      = m.file_name;
 
-    FILE * f = std::fopen(path.c_str(), "rb");
     if (!f) {
         m.error = "cannot open";
         return m;
@@ -178,7 +181,7 @@ ModelInfo read_model_info(const std::string & path) {
         }
     }
     std::fseek(f, 0, SEEK_END);
-    m.file_bytes = (uint64_t) std::ftell(f);
+    m.file_bytes = file_bytes ? file_bytes : (uint64_t) std::ftell(f);
     std::fclose(f);
     if (r.bad) {
         m.error = "metadata could not be read";
@@ -219,12 +222,25 @@ ModelInfo read_model_info(const std::string & path) {
     if (!m.ok) {
         m.error = "no layer count for architecture '" + m.arch + "'";
     }
+    return m;
+}
+
+}  // namespace
+
+ModelInfo read_model_info(const std::string & path) {
+    ModelInfo m = parse_model_info(std::fopen(path.c_str(), "rb"), path, 0);
     m.mmproj = find_mmproj(path);
     if (!m.mmproj.empty()) {
         struct stat st = {};
         m.mmproj_bytes = stat(m.mmproj.c_str(), &st) == 0 ? (uint64_t) st.st_size : 0;
     }
     return m;
+}
+
+ModelInfo read_model_header(const std::string & name, const std::string & head, uint64_t file_bytes) {
+    // fmemopen does not copy: `head` outlives the parse.
+    FILE * f = head.empty() ? nullptr : fmemopen(const_cast<char *>(head.data()), head.size(), "rb");
+    return parse_model_info(f, name, file_bytes);
 }
 
 double kv_bytes_per_token(const ModelInfo & m, const std::string & type) {

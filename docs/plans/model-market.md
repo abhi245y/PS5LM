@@ -31,6 +31,19 @@ download folder (USB by default if it is faster) depends on this.
 On the console: search finds a model, the page shows its fit, the download
 finishes with a verified checksum, and the model loads from the library.
 
+## Progress
+
+- Done: the planner plans from the first bytes of a GGUF
+  (`read_model_header`), so a 16 MiB range request is enough to show a
+  model's fit before downloading it; checked against whole-file plans for
+  Llama 3.2 3B, Gemma 4 E4B, Qwen 3.8 27B and Granite 3.3 2B.
+- Open, needs the console: HTTPS from the title. The app is built without
+  TLS (`LLAMA_OPENSSL=OFF`). Two ways: the system's `libSceHttp2` and
+  `libSceSsl` (the SDK has their stubs; whether they resolve in a title is
+  unknown), or a TLS library built into the app (mbedTLS) with a CA bundle.
+  Try the system library first: no certificates to ship.
+- Open, needs the console: the write-speed measurement above.
+
 ## Risks
 
 - TLS in a title: certificate checks need a CA bundle.

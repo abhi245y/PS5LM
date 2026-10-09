@@ -25,6 +25,9 @@ v0.1.x are the upstream payload releases by cobanov.
 - Images: a vision model's `mmproj` file beside it is loaded with it
   (`--mmproj`), and the planner counts its memory.
 
+- The planner can plan from the first bytes of a GGUF (a range request), the
+  base of the model market's fit column.
+
 ### Changed
 - One MEMORY tile replaces MEMORY and GPU MEMORY (the GPU and CPU share one
   pool); CONTEXT takes in the session counts.

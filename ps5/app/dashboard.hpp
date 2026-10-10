@@ -10,6 +10,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "market.hpp"
 #include "settings.hpp"
 #include "stats.hpp"
 
@@ -37,8 +38,9 @@ struct DashboardFrame {
 class Dashboard {
   public:
     static constexpr int kTiles = 8;
-    static constexpr int kPages = 3;
+    static constexpr int kPages = 4;
     static constexpr int kLogsPage = 2;
+    static constexpr int kMarketPage = 3;
 
     explicit Dashboard(const hui::ui::Fonts & fonts) : fonts_(fonts) { ring_.snap(ring_rect()); }
 
@@ -47,6 +49,7 @@ class Dashboard {
     void set_settings(const Settings & s) { settings_ = s; }
     const Settings & settings() const { return settings_; }
     void set_logs(std::vector<std::string> app, std::vector<std::string> llama);
+    void set_market(MarketView view) { market_ = std::move(view); }
     int  page() const { return page_; }
     void update(const hui::InputFrame & input, float dt, hui::ui::Feedback & feedback);
     void draw(DashboardFrame & frame) const;
@@ -54,8 +57,9 @@ class Dashboard {
     // What the user asked for, once: load or unload a model, or the settings
     // changed (read them with settings()).
     struct Request {
-        enum Kind { none, load, unload, settings, clear_scratch } kind = none;
-        std::string path;
+        enum Kind { none, load, unload, settings, clear_scratch, market_search, market_open, market_plan, market_download } kind = none;
+        std::string path;   // a model, or a market query
+        int repo = -1, file = -1;
     };
     Request take_request() {
         Request r = request_;
@@ -79,6 +83,8 @@ class Dashboard {
     void update_dashboard(const hui::InputFrame & input, hui::ui::Feedback & feedback);
     void update_settings(const hui::InputFrame & input, hui::ui::Feedback & feedback);
     void update_logs(const hui::InputFrame & input, hui::ui::Feedback & feedback);
+    void update_market(const hui::InputFrame & input, hui::ui::Feedback & feedback);
+    void draw_market(hui::gfx::DrawList & list) const;
     const std::vector<std::string> & log_view() const { return log_llama_ ? llama_view_ : app_view_; }
     void refilter_logs();
 
@@ -121,6 +127,13 @@ class Dashboard {
     bool  log_llama_ = false;
     bool  log_errors_ = false;
     int   log_scroll_ = 0;         // lines up from the newest
+
+    MarketView market_;
+    int   market_chip_ = 0;        // which search the chips select
+    int   market_repo_ = 0;        // cursor in the repositories
+    int   market_file_ = 0;        // cursor in the open repository's files
+    bool  market_files_ = false;   // the cursor is in the files
+    bool  market_searched_ = false;
     mutable char size_text_[64] = {};
 };
 

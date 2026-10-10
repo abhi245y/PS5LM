@@ -13,7 +13,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <pthread.h>
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -36,6 +38,8 @@
 #include <GL/glcorearb.h>
 
 #include "dashboard.hpp"
+#include "fetch.hpp"
+#include "market.hpp"
 #include "display.hpp"
 #include "ggml-backend.h"
 #include "model_plan.hpp"
@@ -127,6 +131,73 @@ std::vector<std::string> tail_lines(const char * path) {
         lines.emplace_back(text, start, end - start);
     }
     return lines;
+}
+
+// Probe: download a URL over HTTPS to /data/PS5LM/fetch.out, logging the
+// status, size and speed (scripts/ps5lm-app.sh fetch <url>).
+void probe_fetch(std::string url) {
+    FILE * out = std::fopen("/data/PS5LM/fetch.out", "wb");
+    const FetchResult r = https_get(url, "", [&](const char * p, size_t n) { return out && std::fwrite(p, 1, n, out) == n; });
+    if (out) {
+        std::fclose(out);
+    }
+    std::printf("ps5lm-app: fetch %s: status %d, length %lld, %llu bytes in %.1f s (%.2f MB/s)%s%s\n", url.c_str(),
+                r.status, (long long) r.length, (unsigned long long) r.bytes, r.seconds,
+                r.seconds > 0 ? r.bytes / 1e6 / r.seconds : 0.0, r.error.empty() ? "" : ", ", r.error.c_str());
+}
+
+// Probe: how fast the app can write, by method and place, fsync included
+// (scripts/ps5lm-app.sh bench-write). 128 MiB each.
+void probe_write() {
+    const size_t total = 128u << 20;
+    std::vector<char> buf(8u << 20, 'x');
+    const char * dirs[] = { "/data/PS5LM", "/mnt/usb0" };
+    for (const char * dir : dirs) {
+        struct statvfs v = {};
+        if (statvfs(dir, &v) != 0) {
+            continue;
+        }
+        const std::string path = std::string(dir) + "/write-bench.tmp";
+        struct Method {
+            const char * name;
+            size_t       chunk;
+            bool         stdio;
+            int          flags;
+        } methods[] = {
+            { "stdio 8M", 8u << 20, true, 0 },
+            { "write 1M", 1u << 20, false, 0 },
+            { "write 8M", 8u << 20, false, 0 },
+            { "write 8M direct", 8u << 20, false, O_DIRECT },
+        };
+        for (const auto & m : methods) {
+            const auto t0 = std::chrono::steady_clock::now();
+            bool ok = true;
+            if (m.stdio) {
+                FILE * f = std::fopen(path.c_str(), "wb");
+                for (size_t done = 0; f && ok && done < total; done += m.chunk) {
+                    ok = std::fwrite(buf.data(), 1, m.chunk, f) == m.chunk;
+                }
+                ok = f && ok && std::fflush(f) == 0 && fsync(fileno(f)) == 0;
+                if (f) {
+                    std::fclose(f);
+                }
+            } else {
+                const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | m.flags, 0666);
+                for (size_t done = 0; fd >= 0 && ok && done < total; done += m.chunk) {
+                    ok = write(fd, buf.data(), m.chunk) == (ssize_t) m.chunk;
+                }
+                ok = fd >= 0 && ok && fsync(fd) == 0;
+                if (fd >= 0) {
+                    close(fd);
+                }
+            }
+            const double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+            std::printf("ps5lm-app: write-bench %s %s: %s, %.1f MB/s\n", dir, m.name, ok ? "ok" : strerror(errno),
+                        ok ? total / 1e6 / s : 0.0);
+            unlink(path.c_str());
+        }
+    }
+    std::printf("ps5lm-app: write-bench done\n");
 }
 
 // Bytes under a folder, or 0.
@@ -526,6 +597,9 @@ int main(int, char **) {
     sounds.load(std::string(kAssets) + "/audio/sfx");
 
     Dashboard dash(fonts);
+    Market    market;
+    market.start(models.budget_gib);
+    std::string last_download;
     dash.set_settings(models.settings);
     bool      library_shown = false;  // opened once at launch when no model is loaded
     bool      scratch_warned = false;
@@ -582,6 +656,8 @@ int main(int, char **) {
                 { "square", hui::Action::west, hui::Direction::none },
                 { "l1", hui::Action::page_prev, hui::Direction::none },
                 { "r1", hui::Action::page_next, hui::Direction::none },
+                { "l2", hui::Action::jump_prev, hui::Direction::none },
+                { "r2", hui::Action::jump_next, hui::Direction::none },
             };
             for (const auto & k : keys) {
                 if (key == k.name) {
@@ -616,6 +692,18 @@ int main(int, char **) {
             }
             scratch_warned = over;
         }
+        if (dash.page() == Dashboard::kMarketPage && n % 10 == 0) {
+            MarketView mv = market.snapshot();
+            // A finished download joins the library.
+            if (!mv.download_result.empty() && mv.download_result != last_download) {
+                last_download = mv.download_result;
+                if (mv.download_result.rfind("Saved", 0) == 0) {
+                    models.scan(stats);
+                    notify(("PS5LM: " + mv.download_result).c_str());
+                }
+            }
+            dash.set_market(std::move(mv));
+        }
         if (dash.page() == Dashboard::kLogsPage && n % 60 == 0) {
             dash.set_logs(tail_lines(kLog), tail_lines(kLlamaLog));
         }
@@ -628,6 +716,18 @@ int main(int, char **) {
             save_settings(kSettings, models.settings);
             models.scan(stats);
             std::printf("ps5lm-app: settings saved\n");
+        }
+        switch (req.kind) {
+            case Dashboard::Request::market_search: market.search(req.path); break;
+            case Dashboard::Request::market_open: market.open_repo(req.repo); break;
+            case Dashboard::Request::market_plan: market.plan_file(req.repo, req.file); break;
+            case Dashboard::Request::market_download: {
+                std::error_code ec;
+                std::filesystem::create_directories(models.settings.download_dir, ec);
+                market.download(req.repo, req.file, models.settings.download_dir);
+                break;
+            }
+            default: break;
         }
         if (req.kind == Dashboard::Request::clear_scratch) {
             std::error_code ec;
@@ -644,6 +744,10 @@ int main(int, char **) {
                 req = { Dashboard::Request::load, p };
             } else if (!take_request_file("/data/PS5LM/unload").empty()) {
                 req = { Dashboard::Request::unload, "" };
+            } else if (std::string u = take_request_file("/data/PS5LM/fetch"); !u.empty()) {
+                std::thread(probe_fetch, u).detach();
+            } else if (!take_request_file("/data/PS5LM/bench-write").empty()) {
+                std::thread(probe_write).detach();
             }
         }
         if (req.kind == Dashboard::Request::unload || req.kind == Dashboard::Request::load) {

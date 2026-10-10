@@ -19,13 +19,26 @@ constexpr double kGiB = 1073741824.0;
 // GGUF metadata value types.
 enum : uint32_t { U8, I8, U16, I16, U32, I32, F32, BOOL, STRING, ARRAY, U64, I64, F64 };
 
+// A GGUF header from a file, or from memory (the start of a remote file);
+// the PS5's libc has no fmemopen.
 struct Reader {
-    FILE * f;
-    bool   bad = false;
+    FILE *       f   = nullptr;
+    const char * mem = nullptr;
+    size_t       size = 0, pos = 0;
+    bool         bad = false;
 
+    size_t read(void * out, size_t n) {
+        if (f) {
+            return std::fread(out, 1, n, f);
+        }
+        const size_t k = pos + n <= size ? n : 0;
+        std::memcpy(out, mem + pos, k);
+        pos += k;
+        return k;
+    }
     template <typename T> T get() {
         T v{};
-        if (std::fread(&v, sizeof(v), 1, f) != 1) {
+        if (read(&v, sizeof(v)) != sizeof(v)) {
             bad = true;
         }
         return v;
@@ -37,15 +50,16 @@ struct Reader {
             return {};
         }
         std::string s(n, '\0');
-        if (n && std::fread(s.data(), 1, n, f) != n) {
+        if (n && read(s.data(), n) != n) {
             bad = true;
         }
         return s;
     }
     void skip(uint64_t n) {
-        if (std::fseek(f, (long) n, SEEK_CUR) != 0) {
+        if (f ? std::fseek(f, (long) n, SEEK_CUR) != 0 : pos + n > size) {
             bad = true;
         }
+        pos += f ? 0 : n;
     }
 };
 
@@ -133,19 +147,21 @@ namespace {
 
 // Reads a GGUF header from `f` (and closes it). `file_bytes` is the whole
 // file's size when `f` holds only its start; 0 to measure `f`.
-ModelInfo parse_model_info(FILE * f, const std::string & path, uint64_t file_bytes) {
+ModelInfo parse_model_info(Reader r, const std::string & path, uint64_t file_bytes) {
+    FILE * f = r.f;
     ModelInfo m;
     m.path      = path;
     m.file_name = path.substr(path.find_last_of('/') + 1);
     m.name      = m.file_name;
 
-    if (!f) {
+    if (!f && !r.mem) {
         m.error = "cannot open";
         return m;
     }
-    Reader r{ f };
     if (r.get<uint32_t>() != 0x46554747u) {  // "GGUF"
-        std::fclose(f);
+        if (f) {
+            std::fclose(f);
+        }
         m.error = "not a GGUF file";
         return m;
     }
@@ -180,9 +196,13 @@ ModelInfo parse_model_info(FILE * f, const std::string & path, uint64_t file_byt
             ints[key] = read_int(r, t);
         }
     }
-    std::fseek(f, 0, SEEK_END);
-    m.file_bytes = file_bytes ? file_bytes : (uint64_t) std::ftell(f);
-    std::fclose(f);
+    if (f) {
+        std::fseek(f, 0, SEEK_END);
+    }
+    m.file_bytes = file_bytes ? file_bytes : f ? (uint64_t) std::ftell(f) : r.size;
+    if (f) {
+        std::fclose(f);
+    }
     if (r.bad) {
         m.error = "metadata could not be read";
         return m;
@@ -228,7 +248,9 @@ ModelInfo parse_model_info(FILE * f, const std::string & path, uint64_t file_byt
 }  // namespace
 
 ModelInfo read_model_info(const std::string & path) {
-    ModelInfo m = parse_model_info(std::fopen(path.c_str(), "rb"), path, 0);
+    Reader r;
+    r.f = std::fopen(path.c_str(), "rb");
+    ModelInfo m = parse_model_info(r, path, 0);
     m.mmproj = find_mmproj(path);
     if (!m.mmproj.empty()) {
         struct stat st = {};
@@ -238,9 +260,10 @@ ModelInfo read_model_info(const std::string & path) {
 }
 
 ModelInfo read_model_header(const std::string & name, const std::string & head, uint64_t file_bytes) {
-    // fmemopen does not copy: `head` outlives the parse.
-    FILE * f = head.empty() ? nullptr : fmemopen(const_cast<char *>(head.data()), head.size(), "rb");
-    return parse_model_info(f, name, file_bytes);
+    Reader r;
+    r.mem  = head.data();
+    r.size = head.size();
+    return parse_model_info(r, name, file_bytes);
 }
 
 double kv_bytes_per_token(const ModelInfo & m, const std::string & type) {

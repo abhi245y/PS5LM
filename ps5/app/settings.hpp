@@ -18,6 +18,7 @@ struct Settings {
     bool        sounds    = true;
     bool        tools     = true;   // file tools in the browser chat, inside the scratch folder
     uint32_t    scratch_limit_gib = 2;  // warn when the scratch folder grows past this
+    std::string download_dir = "/data/PS5LM/models";  // where the market saves models
 
     bool operator==(const Settings &) const = default;
 };

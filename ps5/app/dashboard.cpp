@@ -159,11 +159,18 @@ Color state_color(ServerState s) {
 
 constexpr float kRowH = 78.0f;
 constexpr Rect  kLibrary{ 360.0f, 150.0f, 1200.0f, 800.0f };
-constexpr const char * kPageNames[Dashboard::kPages] = { "Dashboard", "Settings", "Logs" };
+constexpr const char * kPageNames[Dashboard::kPages] = { "Dashboard", "Settings", "Logs", "Get models" };
+
+// The market's searches, switched with L2/R2: Hugging Face's most downloaded
+// GGUF repositories, then the families the presets know.
+constexpr const char * kMarketChips[] = { "Popular", "Qwen", "Gemma", "Llama", "Mistral", "Phi", "Granite" };
+constexpr int          kMarketChipCount = 7;
+constexpr float        kMarketRowH = 66.0f;
+constexpr int          kMarketRows = 9;
 
 // ---- Settings: categories of rows, after the kit's "Control Room" ---------------
 
-enum class Setting : int { auto_load, default_model, ctx_cap, kv_type, sounds, tools, scratch_limit, clear_scratch };
+enum class Setting : int { auto_load, default_model, ctx_cap, kv_type, sounds, tools, scratch_limit, clear_scratch, download_dir };
 
 struct SettingRow {
     Setting      id;
@@ -193,8 +200,9 @@ constexpr SettingCategory kCategories[] = {
         { Setting::clear_scratch, "Clear the scratch folder", "Deletes everything the chat's tools wrote." } },
       3 },
     { "App", "The app itself.",
-      { { Setting::sounds, "Sounds", "Interface sounds on the TV." } },
-      1 },
+      { { Setting::sounds, "Sounds", "Interface sounds on the TV." },
+        { Setting::download_dir, "Download to", "Where Get models saves: internal storage, or PS5LM/models on the USB drive." } },
+      2 },
 };
 constexpr int kCategoryCount = 4;
 
@@ -242,6 +250,10 @@ void Dashboard::update(const hui::InputFrame & input, float dt, ui::Feedback & f
             if (page_ == kLogsPage) {
                 log_scroll_ = 0;
             }
+            if (page_ == kMarketPage && !market_searched_) {
+                market_searched_ = true;
+                request_ = { Request::market_search, "" };
+            }
         } else {
             feedback.play(hui::audio::Cue::error, 1.0f, 0.0f, 0.6f);
         }
@@ -249,8 +261,10 @@ void Dashboard::update(const hui::InputFrame & input, float dt, ui::Feedback & f
         update_dashboard(input, feedback);
     } else if (page_ == 1) {
         update_settings(input, feedback);
-    } else {
+    } else if (page_ == kLogsPage) {
         update_logs(input, feedback);
+    } else {
+        update_market(input, feedback);
     }
 
     for (int i = 0; i < kTiles; ++i) {
@@ -390,6 +404,7 @@ std::string setting_text(const Settings & s, Setting id, const std::vector<Model
         case Setting::scratch_limit:
             std::snprintf(t, sizeof(t), "%u GiB", s.scratch_limit_gib);
             return t;
+        case Setting::download_dir: return s.download_dir.rfind("/mnt/", 0) == 0 ? "USB drive" : "Internal storage";
         default: return "";
     }
 }
@@ -469,6 +484,14 @@ bool step_setting(Settings & s, Setting id, int dir, const std::vector<ModelRow>
         case Setting::sounds: s.sounds = !s.sounds; return true;
         case Setting::tools: s.tools = !s.tools; return true;
         case Setting::clear_scratch: return false;
+        case Setting::download_dir: {
+            const bool usb = s.download_dir.rfind("/mnt/", 0) == 0;
+            if ((dir > 0) == usb) {
+                return false;
+            }
+            s.download_dir = usb ? "/data/PS5LM/models" : "/mnt/usb0/PS5LM/models";
+            return true;
+        }
     }
     return false;
 }
@@ -565,6 +588,65 @@ int log_level(const std::string & line) {
 }
 
 }  // namespace
+
+void Dashboard::update_market(const hui::InputFrame & input, ui::Feedback & feedback) {
+    const int step = input.is_pressed(Action::jump_next) ? 1 : input.is_pressed(Action::jump_prev) ? -1 : 0;
+    if (step != 0) {
+        const int next = market_chip_ + step;
+        if (next >= 0 && next < kMarketChipCount) {
+            market_chip_ = next;
+            market_repo_ = 0;
+            market_files_ = false;
+            request_ = { Request::market_search, next == 0 ? std::string() : std::string(kMarketChips[next]) };
+            feedback.play(hui::audio::Cue::tab);
+        } else {
+            feedback.play(hui::audio::Cue::error, 1.0f, 0.0f, 0.6f);
+        }
+        return;
+    }
+    const int repos = (int) market_.repos.size();
+    const MarketRepo * open = market_.open >= 0 && market_.open < repos ? &market_.repos[(size_t) market_.open] : nullptr;
+    const int files = open ? (int) open->files.size() : 0;
+    int & cursor = market_files_ ? market_file_ : market_repo_;
+    const int count = market_files_ ? files : repos;
+    if (input.nav == Direction::up || input.nav == Direction::down) {
+        const int next = cursor + (input.nav == Direction::down ? 1 : -1);
+        if (next >= 0 && next < count) {
+            cursor = next;
+            feedback.play(hui::audio::Cue::focus, 1.0f + 0.02f * (float) next);
+            if (market_files_) {
+                request_ = { Request::market_plan, "", market_.open, cursor };
+            }
+        } else if (!input.nav_repeat) {
+            feedback.play(hui::audio::Cue::error, 1.0f, 0.0f, 0.6f);
+        }
+    }
+    if (input.is_pressed(Action::confirm)) {
+        if (!market_files_ && cursor < repos) {
+            request_ = { Request::market_open, "", cursor, -1 };
+            market_files_ = true;
+            market_file_ = 0;
+            feedback.play(hui::audio::Cue::open);
+        } else if (market_files_ && open && cursor < files) {
+            const MarketFile & f = open->files[(size_t) cursor];
+            if (f.fits == 0 || market_.download_progress >= 0) {
+                feedback.play(hui::audio::Cue::error);  // too big, or one download already runs
+            } else {
+                request_ = { Request::market_download, "", market_.open, cursor };
+                feedback.play(hui::audio::Cue::complete);
+            }
+        }
+    }
+    if (input.is_pressed(Action::back) && market_files_) {
+        market_files_ = false;
+        feedback.play(hui::audio::Cue::back);
+    }
+    // The first file of a freshly opened repository gets planned too.
+    if (request_.kind == Request::none && market_files_ && files > 0 && market_file_ == 0 && open->files[0].fits == -1 &&
+        !market_.busy) {
+        request_ = { Request::market_plan, "", market_.open, 0 };
+    }
+}
 
 void Dashboard::set_logs(std::vector<std::string> app, std::vector<std::string> llama) {
     app_log_ = std::move(app);
@@ -1408,6 +1490,100 @@ void Dashboard::draw_settings(gfx::DrawList & list) const {
     ui::text(list, f.regular, help, kSettingsPanel.x + 48, foot + 50, 22, kInk.with_alpha(kMuted * in));
 }
 
+// Two panes in the Logs page's frame: the repositories of the search on the
+// left, the open one's GGUF files on the right with whether each fits.
+void Dashboard::draw_market(gfx::DrawList & list) const {
+    const ui::Fonts & f = fonts_;
+    const Rect & p = kLogPanel;
+    const MarketView & M = market_;
+    draw_panel(list, p, kRadius, 0.0f, kLime);
+    // The searches as chips; L2/R2 move between them.
+    float x = p.x + kPad;
+    for (int k = 0; k < kMarketChipCount; ++k) {
+        const bool on = k == market_chip_;
+        const float w = f.semibold.measure(kMarketChips[k], 18) + 40;
+        const Rect chip{ x, p.y + 22, w, 38 };
+        list.bordered_rect(chip, 19, on ? kLime.with_alpha(0.16f) : kClear, 1.5f, on ? kLime : kInk.with_alpha(0.16f));
+        ui::text(list, on ? f.semibold : f.regular, kMarketChips[k], chip.cx(), chip.cy() + 7, 18,
+                 on ? kInk : kInk.with_alpha(kMuted), gfx::Align::center);
+        x += w + 12;
+    }
+    const char * status = M.busy ? "Working" : M.status.c_str();
+    ui::text(list, f.regular, f.regular.font->fit(status, 20, 420), p.x + p.w - kPad, p.y + 48, 20,
+             kInk.with_alpha(kMuted), gfx::Align::right);
+    list.rounded_rect({ p.x + kPad, p.y + 76, p.w - 2 * kPad, 1 }, 0, kInk.with_alpha(0.1f));
+
+    const float lx = p.x + kPad, lw = 620, rx = lx + lw + 40, rw = p.x + p.w - kPad - rx, top = p.y + 96;
+    list.rounded_rect({ rx - 20, top, 1, kMarketRows * kMarketRowH }, 0, kInk.with_alpha(0.1f));
+    char text[160];
+    // Repositories.
+    const int repos = (int) M.repos.size();
+    const int rfirst = std::max(0, market_repo_ - (kMarketRows - 1));
+    for (int i = rfirst; i < repos && i < rfirst + kMarketRows; ++i) {
+        const MarketRepo & r = M.repos[(size_t) i];
+        const float y = top + (float) (i - rfirst) * kMarketRowH;
+        const bool cur = i == market_repo_;
+        if (cur) {
+            const Color c = market_files_ ? kInk.with_alpha(0.08f) : kLime.with_alpha(0.12f);
+            list.bordered_rect({ lx - 8, y, lw + 16, kMarketRowH - 8 }, 14, c, 2.0f,
+                               market_files_ ? kInk.with_alpha(0.2f) : kLime.with_alpha(0.7f));
+        }
+        ui::text(list, cur ? f.semibold : f.regular, f.regular.font->fit(r.id, 22, lw - 150), lx + 12, y + 37, 22,
+                 kInk.with_alpha(cur ? 1.0f : 0.85f));
+        std::snprintf(text, sizeof(text), "%.1fk", r.downloads / 1000.0);
+        ui::text(list, f.mono, text, lx + lw - 8, y + 37, 18, kInk.with_alpha(kMuted), gfx::Align::right);
+    }
+    if (repos == 0) {
+        ui::text(list, f.regular, M.busy ? "Searching Hugging Face" : "No repositories", lx + 12, top + 40, 22,
+                 kInk.with_alpha(kFaint));
+    }
+
+    // The open repository's files.
+    const MarketRepo * open = M.open >= 0 && M.open < repos ? &M.repos[(size_t) M.open] : nullptr;
+    if (!open) {
+        ui::paragraph(list, f.regular, "Cross opens a repository: its GGUF files, their sizes, and the context each would get on this console.",
+                      rx, top + 40, 22, rw, 32, kInk.with_alpha(kFaint), 3);
+    } else {
+        ui::text(list, f.semibold, f.semibold.font->fit(open->id, 22, rw), rx, top + 4, 22, kLime);
+        const int files = (int) open->files.size();
+        const int ffirst = std::max(0, market_file_ - (kMarketRows - 2));
+        for (int i = ffirst; i < files && i < ffirst + kMarketRows - 1; ++i) {
+            const MarketFile & mf = open->files[(size_t) i];
+            const float y = top + 26 + (float) (i - ffirst) * kMarketRowH;
+            const bool cur = market_files_ && i == market_file_;
+            if (cur) {
+                list.bordered_rect({ rx - 8, y, rw + 16, kMarketRowH - 8 }, 14, kLime.with_alpha(0.12f), 2.0f,
+                                   kLime.with_alpha(0.7f));
+            }
+            const size_t slash = mf.name.find_last_of('/');
+            const std::string short_name = mf.name.substr(slash == std::string::npos ? 0 : slash + 1);
+            ui::text(list, cur ? f.semibold : f.regular, f.regular.font->fit(short_name, 20, rw - 230), rx + 12, y + 26,
+                     20, kInk.with_alpha(mf.fits == 0 ? 0.45f : 1.0f));
+            ui::text(list, f.regular, f.regular.font->fit(mf.plan.empty() ? "Not planned yet" : mf.plan, 16, rw - 230),
+                     rx + 12, y + 50, 16, kInk.with_alpha(kFaint));
+            std::snprintf(text, sizeof(text), "%.1f GiB", mf.bytes / 1073741824.0);
+            ui::text(list, f.mono, text, rx + rw - 110, y + 36, 18, kInk.with_alpha(0.85f), gfx::Align::right);
+            const char * tag = mf.fits == 1 ? "FITS" : mf.fits == 0 ? "TOO BIG" : mf.fits == -2 ? "UNKNOWN" : "CHECK";
+            const Color  tc  = mf.fits == 1 ? kLime : mf.fits == 0 ? kRose : kInk.with_alpha(kMuted);
+            caps(list, f, tag, rx + rw - 8, y + 36, 14, tc, gfx::Align::right);
+        }
+    }
+
+    // The download, under both panes.
+    const float by = p.y + p.h - 64;
+    list.rounded_rect({ p.x + kPad, by - 24, p.w - 2 * kPad, 1 }, 0, kInk.with_alpha(0.1f));
+    if (M.download_progress >= 0) {
+        std::snprintf(text, sizeof(text), "Downloading %s  \xC2\xB7  %.0f%%  \xC2\xB7  %.1f MB/s", M.download_file.c_str(),
+                      M.download_progress * 100.0f, M.download_mbps);
+        ui::text(list, f.regular, f.regular.font->fit(text, 20, p.w - 2 * kPad - 420), p.x + kPad, by + 6, 20, kInk);
+        bar(list, { p.x + p.w - kPad - 380, by - 4, 380, 12 }, M.download_progress, kLime);
+    } else {
+        const std::string note = !M.download_result.empty() ? M.download_result
+                                                            : "Downloads go to " + settings_.download_dir + "  \xC2\xB7  change in Settings";
+        ui::text(list, f.regular, f.regular.font->fit(note, 20, p.w - 2 * kPad), p.x + kPad, by + 6, 20, kInk.with_alpha(kMuted));
+    }
+}
+
 void Dashboard::draw_logs(gfx::DrawList & list) const {
     const ui::Fonts & f = fonts_;
     const Rect & p = kLogPanel;
@@ -1486,6 +1662,10 @@ void Dashboard::draw_hints(DashboardFrame & frame) const {
             const ui::Hint plain[] = { { ui::Button::dpad, "Change" }, { ui::Button::circle, "Back" } };
             ui::draw_hints(frame.scene, fonts_, style, toggle ? hints : plain, toggle ? 3 : 2, kGridX + kGridW, true);
         }
+    } else if (page_ == kMarketPage) {
+        const ui::Hint browse[] = { { ui::Button::l2, "Search" }, { ui::Button::dpad, "Choose" }, { ui::Button::cross, "Open" } };
+        const ui::Hint files[] = { { ui::Button::dpad, "Choose" }, { ui::Button::cross, "Download" }, { ui::Button::circle, "Back" } };
+        ui::draw_hints(frame.scene, fonts_, style, market_files_ ? files : browse, 3, kGridX + kGridW, true);
     } else if (page_ == kLogsPage) {
         const ui::Hint hints[] = { { ui::Button::dpad, "Scroll" },
                                    { ui::Button::square, log_llama_ ? "app.log" : "llama.log" },
@@ -1540,8 +1720,10 @@ void Dashboard::draw(DashboardFrame & frame) const {
         scene.pop_transform();
     } else if (page_ == 1) {
         draw_settings(scene);
-    } else {
+    } else if (page_ == kLogsPage) {
         draw_logs(scene);
+    } else {
+        draw_market(scene);
     }
     scene.pop_opacity();
     scene.pop_transform();

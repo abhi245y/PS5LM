@@ -1,10 +1,23 @@
-PS5LM: confine llama-server's built-in tools to LLAMA_TOOLS_ROOT (the app's scratch folder).
+PS5LM: confine llama-server's built-in tools to LLAMA_TOOLS_ROOT (the app's scratch folder): relative paths start there, and a path outside it is taken as relative to it.
 
 diff --git a/tools/server/server-tools.cpp b/tools/server/server-tools.cpp
-index 12e9dbb8c..8ff130fab 100644
+index 12e9dbb8c..91fd57213 100644
 --- a/tools/server/server-tools.cpp
 +++ b/tools/server/server-tools.cpp
-@@ -323,6 +323,15 @@ public:
+@@ -306,6 +306,12 @@ public:
+         const std::string p = expand_home(path);
+ 
+         fs::path full = path_from_utf8(p);
++        // PS5LM: with LLAMA_TOOLS_ROOT set, a relative path starts there (a
++        // PS5 title cannot read its working directory).
++        const char * tools_root = std::getenv("LLAMA_TOOLS_ROOT");
++        if (!full.is_absolute() && tools_root && *tools_root) {
++            full = path_from_utf8(tools_root) / full;
++        }
+         if (!full.is_absolute()) {
+             if (cwd.empty()) {
+                 std::error_code ec;
+@@ -323,6 +329,15 @@ public:
          if (!full.has_filename() && full != full.root_path()) {
              full = full.parent_path();
          }

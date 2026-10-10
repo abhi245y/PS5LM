@@ -42,6 +42,12 @@ void push(std::vector<float> & v, float x) {
     }
 }
 
+// sceKernelGetSocPowerConsumption's first word: milliwatts in the low half.
+float soc_watts(uint64_t raw) {
+    const uint64_t mw = raw & 0xffffffffu;
+    return mw >= 1000 && mw <= 350000 ? (float) (mw / 1000.0) : 0.0f;
+}
+
 // Free and total GiB of the filesystem holding `path`, or zeros.
 void space(const char * path, double * free, double * total) {
     struct statvfs v = {};
@@ -123,6 +129,39 @@ double metric(const std::string & text, const char * name) {
     return at == std::string::npos ? 0.0 : std::strtod(text.c_str() + at + key.size(), nullptr);
 }
 
+// One sample from Prometheus text by its full name and labels
+// ("ps5_temperature_celsius{sensor=\"cpu\"}"), or `missing`.
+double sample(const std::string & text, const std::string & key, double missing) {
+    const size_t at = text.find("\n" + key + " ");
+    return at == std::string::npos ? missing : std::strtod(text.c_str() + at + key.size() + 2, nullptr);
+}
+
+// Sends a payload to an ELF loader on this console (elfldr, port 9021).
+bool send_payload(const char * path, int port) {
+    FILE * f = std::fopen(path, "rb");
+    if (!f) {
+        return false;
+    }
+    const int fd = socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in to = {};
+#ifdef __FreeBSD__
+    to.sin_len = sizeof(to);
+#endif
+    to.sin_family = AF_INET;
+    to.sin_port   = htons((uint16_t) port);
+    to.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    bool ok = fd >= 0 && connect(fd, (sockaddr *) &to, sizeof(to)) == 0;
+    char buf[65536];
+    for (size_t n; ok && (n = std::fread(buf, 1, sizeof(buf), f)) > 0;) {
+        ok = send(fd, buf, n, 0) == (ssize_t) n;
+    }
+    std::fclose(f);
+    if (fd >= 0) {
+        close(fd);
+    }
+    return ok;
+}
+
 std::string local_address() {
     const int fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0) {
@@ -202,7 +241,7 @@ void StatsCollector::run() {
     double last_wall = start, last_cpu = cpu_seconds();
     double last_busy = 0, last_tokens = 0, last_gen_s = 0;
     bool   have_last = false, last_working = false;
-    double last_ptok = 0, last_psec = 0;
+    double last_ptok = 0, last_psec = 0, last_decoded = 0;
     for (;;) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
         const double wall = now_s(), cpu = cpu_seconds();
@@ -240,15 +279,56 @@ void StatsCollector::run() {
         if (sceKernelGetCpuTemperature(&t) == 0 && t > -100 && t < 200) {
             cpu_t = (float) t;
         }
-        // The unit is not documented; milliwatts is the community reading,
-        // so only plausible values are shown.
+        // Milliwatts in the low 32 bits; the high half counts slowly (a
+        // sample number). Measured on the console: 22 W idle, 86 W while the
+        // 27B generates.
         uint64_t raw[16] = {};
-        if (sceKernelGetSocPowerConsumption(raw, 0.0) == 0 && raw[0] >= 1000 && raw[0] <= 350000) {
-            watts = (float) (raw[0] / 1000.0);
+        if (sceKernelGetSocPowerConsumption(raw, 0.0) == 0) {
+            watts = soc_watts(raw[0]);
         }
         const long hz = sceKernelGetCpuFrequency();
         ghz = hz > 0 ? (float) (hz / 1e9) : 0.0f;
+        static bool logged = false;  // ponytail: once, to see what a title is allowed to read
+        if (!logged) {
+            logged = true;
+            int t0 = -1000, t1 = -1000;
+            const int r0 = sceKernelGetSocSensorTemperature(0, &t0), r1 = sceKernelGetCpuTemperature(&t1);
+            std::printf("ps5lm-app: sensors: soc rc 0x%x t %d, cpu rc 0x%x t %d, power raw %llu, cpu hz %ld\n", r0, t0,
+                        r1, t1, (unsigned long long) raw[0], hz);
+        }
 #endif
+        // A title may not read the sensors (0x80020002); a payload may.
+        // Marice/ps5-exporter, when loaded, serves them on port 9100.
+        float fan = -1;
+        bool  from_exporter = false;
+        std::vector<std::pair<std::string, float>> temps;
+        if (soc_t < -100) {
+            std::string p = http_get(9100, "/metrics");
+            // Not running: hand the bundled copy to elfldr, at start and then
+            // once a minute (elfldr may come later).
+            if (p.empty() && (long) (wall - start) % 60 == 1) {
+                const bool sent = send_payload("/app0/payloads/ps5-exporter.elf", 9021);
+                std::printf("ps5lm-app: ps5-exporter not running; %s\n",
+                            sent ? "sent the bundled copy to elfldr" : "no elfldr on 9021 to load it");
+            }
+            if (!p.empty()) {
+                from_exporter = true;
+                soc_t = (float) sample(p, "ps5_temperature_celsius{sensor=\"soc0\"}", -1000);
+                cpu_t = (float) sample(p, "ps5_temperature_celsius{sensor=\"cpu\"}", -1000);
+                watts = soc_watts((uint64_t) sample(p, "ps5_soc_power_raw_value", 0));
+                for (int k = -1; k < 16; ++k) {
+                    const std::string name = k < 0 ? std::string("cpu") : "soc" + std::to_string(k);
+                    const double t = sample(p, "ps5_temperature_celsius{sensor=\"" + name + "\"}", -1000);
+                    if (t > -100) {
+                        temps.emplace_back(name, (float) t);
+                    }
+                }
+                fan   = (float) sample(p, "ps5_fan_duty_ratio", -1);
+                if (ghz <= 0) {
+                    ghz = (float) (sample(p, "ps5_cpu_frequency_hertz", 0) / 1e9);
+                }
+            }
+        }
         double data_free = 0, data_total = 0, usb_free = 0, usb_total = 0;
         space("/data", &data_free, &data_total);
         // An empty /mnt/usb0 is a directory of the root filesystem, not a drive.
@@ -263,6 +343,13 @@ void StatsCollector::run() {
         live_.cpu_temp = cpu_t;
         live_.soc_power_w = watts;
         live_.cpu_ghz = ghz;
+        live_.fan = fan;
+        live_.temps = temps;
+        if (watts > 0) {
+            push(live_.power_history, watts);
+            live_.energy_wh += watts * dt / 3600.0;
+        }
+        live_.sensors_from_exporter = from_exporter;
         if (soc_t > -100) {
             push(live_.temp_history, soc_t);
         }
@@ -306,6 +393,14 @@ void StatsCollector::run() {
                 live_.gen_tps = dgen > 0.05 ? (float) ((tokens - last_tokens) / dgen) : 0.0f;
             }
             live_.ctx_used = (uint32_t) (json_int(slots, "n_prompt_tokens") + json_int(slots, "n_decoded"));
+            // The server's counters move only when a request ends, so during a
+            // long reply the speed comes from the slot's decoded count.
+            const double decoded = (double) json_int(slots, "n_decoded");
+            if (working && have_last && decoded > last_decoded && dt > 0) {
+                live_.gen_tps  = (float) ((decoded - last_decoded) / dt);
+                live_.gpu_busy = 1.0f;  // ponytail: a decoding slot keeps the GPU busy; no finer reading mid-request
+            }
+            last_decoded = working ? decoded : 0;
             have_last   = true;
             last_busy   = busy_s;
             last_tokens = tokens;

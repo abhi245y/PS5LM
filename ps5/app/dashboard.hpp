@@ -72,6 +72,8 @@ class Dashboard {
     void draw_hints(DashboardFrame & frame) const;
     void draw_tabs(hui::gfx::DrawList & list) const;
     void draw_details(hui::gfx::DrawList & list, std::uint32_t glass) const;
+    void draw_usage_details(hui::gfx::DrawList & list, const hui::gfx::Rect & panel) const;
+    void draw_power_details(hui::gfx::DrawList & list, const hui::gfx::Rect & panel) const;
     void draw_settings(hui::gfx::DrawList & list) const;
     void draw_logs(hui::gfx::DrawList & list) const;
     void update_dashboard(const hui::InputFrame & input, hui::ui::Feedback & feedback);
@@ -101,6 +103,7 @@ class Dashboard {
     int slot(int row) const;       // a model row's line in the list, after the section headers
 
     bool details_open_ = false;
+    int  detail_tile_ = 0;         // which tile the open details belong to
     hui::tween::Spring details_;   // 0 closed, 1 open
 
     int   page_ = 0;

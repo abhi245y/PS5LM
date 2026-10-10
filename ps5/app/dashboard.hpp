@@ -51,14 +51,24 @@ class Dashboard {
     void set_logs(std::vector<std::string> app, std::vector<std::string> llama);
     void set_market(MarketView view) { market_ = std::move(view); }
     int  page() const { return page_; }
+    void show_page(int page) {
+        page_from_ = page_;
+        page_ = page;
+        page_age_ = 0;
+        if (page == kMarketPage && !market_searched_) {
+            market_searched_ = true;
+            request_ = { Request::market_search, "" };  // the popular list, as arriving with R1 does
+        }
+    }
     void update(const hui::InputFrame & input, float dt, hui::ui::Feedback & feedback);
     void draw(DashboardFrame & frame) const;
 
     // What the user asked for, once: load or unload a model, or the settings
     // changed (read them with settings()).
     struct Request {
-        enum Kind { none, load, unload, settings, clear_scratch, market_search, market_open, market_plan, market_download } kind = none;
-        std::string path;   // a model, or a market query
+        enum Kind { none, load, unload, settings, clear_scratch, market_search, market_open, market_plan, market_download,
+                    market_download_unload } kind = none;
+        std::string path;   // a model, a market query, or the folder a download goes to (empty: the setting)
         int repo = -1, file = -1;
     };
     Request take_request() {
@@ -84,6 +94,7 @@ class Dashboard {
     void update_settings(const hui::InputFrame & input, hui::ui::Feedback & feedback);
     void update_logs(const hui::InputFrame & input, hui::ui::Feedback & feedback);
     void update_market(const hui::InputFrame & input, hui::ui::Feedback & feedback);
+    void start_download(hui::ui::Feedback & feedback);
     void draw_market(hui::gfx::DrawList & list) const;
     const std::vector<std::string> & log_view() const { return log_llama_ ? llama_view_ : app_view_; }
     void refilter_logs();
@@ -134,6 +145,9 @@ class Dashboard {
     int   market_file_ = 0;        // cursor in the open repository's files
     bool  market_files_ = false;   // the cursor is in the files
     bool  market_searched_ = false;
+    bool  market_confirm_ = false;  // asking whether to unload the model first
+    bool  market_space_ = false;    // telling that the download does not fit where it would go
+    std::string market_dir_;        // where this download goes instead of the setting, or empty
     mutable char size_text_[64] = {};
 };
 

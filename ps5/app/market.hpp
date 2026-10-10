@@ -42,6 +42,13 @@ struct MarketView {
     std::string download_result; // "Saved to …" or the error
 };
 
+// One file to download, by name: it survives the app restarting (a download
+// asked for after unloading the model is picked up by the new process).
+struct MarketJob {
+    std::string repo, file, sha256, dir;
+    uint64_t    bytes = 0;
+};
+
 class Market {
   public:
     // budget_gib: GPU memory free before any model, for the fit column.
@@ -51,7 +58,9 @@ class Market {
     void search(const std::string & query);
     void open_repo(int index);
     void plan_file(int repo, int file);  // reads its header (16 MiB range request)
-    void download(int repo, int file, const std::string & dir);
+    bool job(int repo, int file, const std::string & dir, MarketJob * out);
+    // `free_gib`: room on the drive it goes to, or -1 when unknown (the check is skipped).
+    void download(const MarketJob & job, double free_gib);
 
   private:
     // One browse job (search, listing, plan) and one download at a time.

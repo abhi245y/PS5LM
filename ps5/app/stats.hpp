@@ -18,6 +18,13 @@
 
 namespace ps5lm {
 
+// A place models can live: internal storage, the M.2 slot, or a USB drive.
+struct Drive {
+    std::string name;    // "Internal storage", "M.2 drive", "USB drive"
+    std::string models;  // where PS5LM keeps models on it
+    double      free = 0, total = 0;  // GiB; total 0 when unknown (no ps5-exporter)
+};
+
 enum class ServerState : uint8_t { loading, ready, generating, failed, no_model };
 
 struct ModelRow {
@@ -29,7 +36,7 @@ struct ModelRow {
     double      size_gib = 0;
     bool        fits     = false;
     bool        current  = false;
-    bool        on_usb   = false;  // on a USB drive; loads from there like internal ones
+    std::string drive;  // the Drive's name it is on; every drive loads alike
 };
 
 struct Live {
@@ -73,9 +80,8 @@ struct Live {
     double energy_wh = 0;             // SoC energy since the app started
     std::vector<std::pair<std::string, float>> temps;  // every sensor that answered ("cpu", "soc0", ...)
 
-    // Storage, GiB; usb_total 0 when no drive is mounted.
-    double data_free = 0, data_total = 0;
-    double usb_free  = 0, usb_total  = 0;
+    // Storage: internal first, then the M.2 slot and USB drives that are mounted.
+    std::vector<Drive> drives;
     double scratch_gib = 0;  // the chat tools' scratch folder
 
     // Memory, GiB.
@@ -118,6 +124,14 @@ class StatsCollector {
 // The console's address on the LAN, as the PC sees it ("192.168.1.19"), or
 // empty. Asks the routing table through an unconnected UDP socket: nothing is sent.
 // Sends a payload file to an ELF loader on this console; false if none listens.
+// Internal storage, then each mounted M.2 or USB drive, with its space, from
+// ps5-exporter's metrics (asked for here, or text already fetched).
+std::vector<Drive> mounted_drives();
+std::vector<Drive> drives_from_metrics(const std::string & text);
+
+// The kind of drive holding `path`: "Internal storage", "M.2 drive", "USB drive".
+std::string drive_name(const std::string & path);
+
 bool send_payload(const char * path, int port);
 
 std::string local_address();
@@ -127,5 +141,8 @@ std::string http_get(int port, const char * path, int timeout_s = 1);
 
 // One value from Prometheus text ("llamacpp:tokens_predicted_total 42").
 double metric(const std::string & text, const char * name);
+
+// One sample from Prometheus text by its full name and labels, or `missing`.
+double sample(const std::string & text, const std::string & key, double missing);
 
 }  // namespace ps5lm

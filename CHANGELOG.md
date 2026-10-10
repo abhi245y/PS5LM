@@ -7,6 +7,38 @@ v0.1.x are the upstream payload releases by cobanov.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-10
+
+### Added
+- Downloads check free space first: the file and 1 GiB to spare must fit on
+  the drive. When it does not, a dialog offers the drive with the most room
+  for this one download; the download itself refuses too, for the
+  after-restart path.
+- M.2 and every mounted USB drive: Download to in Settings steps through the
+  drives that are mounted (internal, `/mnt/ext0`, `/mnt/usb0..3`), the
+  STORAGE tile and the usage details list each one, and the library groups
+  models by drive. Models in `PS5LM/models` on the M.2 drive are found too.
+- Before a download while a model holds the memory (under 2 GiB free), a
+  dialog offers to unload it first: the app restarts without the model and
+  the download starts on its own.
+
+### Fixed
+- Storage figures were made up: a title's `statvfs` is a stub that reports
+  64 GiB with 16 GiB free for every path, and `statfs` is not exported to
+  titles. Free and total space now come from ps5-exporter (bundled since
+  v0.4.0), which reads the kernel's; internal storage is `/user`. Without the
+  exporter the space shows as unknown and does not block a download.
+- Get models opened after a restart now lists the popular repositories.
+- A download without a checksum survives the unload-and-download restart.
+
+### Checked on the console
+- Real space: internal 166.7 of 627.6 GiB free, USB 461 of 477 GiB, as
+  ps5-exporter reports them; the drive's 33 MB second partition is left out.
+- A 500 GiB job refused on internal storage; a download to the USB drive;
+  Download to stepping between internal and USB, saved; unload and download
+  (SmolLM2 Q2_K); the scratch size warning and Clear.
+- No M.2 drive is fitted, so that path is checked in the preview only.
+
 ## [0.6.0] - 2026-10-10
 
 ### Added

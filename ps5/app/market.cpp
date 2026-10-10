@@ -12,6 +12,7 @@ extern "C" {
 
 #include <cstdio>
 #include <fcntl.h>
+#include <filesystem>
 #include <unistd.h>
 
 namespace ps5lm {
@@ -187,26 +188,39 @@ void Market::plan_file(int repo, int file) {
     });
 }
 
-void Market::download(int repo, int file, const std::string & dir) {
-    std::string id, name, sha;
-    uint64_t    bytes = 0;
+bool Market::job(int repo, int file, const std::string & dir, MarketJob * out) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (repo < 0 || repo >= (int) view_.repos.size() || file < 0 || file >= (int) view_.repos[(size_t) repo].files.size()) {
+        return false;
+    }
+    const MarketFile & f = view_.repos[(size_t) repo].files[(size_t) file];
+    *out = { view_.repos[(size_t) repo].id, f.name, f.sha256, dir, f.bytes };
+    return true;
+}
+
+void Market::download(const MarketJob & job, double free) {
+    const std::string id = job.repo, name = job.file, sha = job.sha256, dir = job.dir;
+    const uint64_t    bytes = job.bytes;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (repo < 0 || repo >= (int) view_.repos.size() || file < 0 ||
-            file >= (int) view_.repos[(size_t) repo].files.size()) {
-            return;
-        }
-        const MarketFile & f = view_.repos[(size_t) repo].files[(size_t) file];
-        id = view_.repos[(size_t) repo].id;
-        name = f.name;
-        sha = f.sha256;
-        bytes = f.bytes;
         if (downloading_) {
             return;
         }
         view_.download_file = name;
-        view_.download_progress = 0;
         view_.download_result.clear();
+        // Room for the file and 1 GiB to spare, so a download never fills a
+        // drive (a full /data upsets the system, not only this app).
+        std::error_code ec;
+        std::filesystem::create_directories(dir, ec);
+        if (free >= 0 && free < bytes / 1073741824.0 + 1.0) {
+            char text[256];
+            std::snprintf(text, sizeof(text), "Not enough space: %s needs %.1f GiB and 1 GiB spare, %s has %.1f GiB free",
+                          name.c_str(), bytes / 1073741824.0, dir.c_str(), free);
+            view_.download_result = text;
+            std::printf("ps5lm-app: download %s/%s: %s\n", id.c_str(), name.c_str(), text);
+            return;
+        }
+        view_.download_progress = 0;
     }
     run(downloading_, [this, id, name, sha, bytes, dir] {
         const size_t slash = name.find_last_of('/');

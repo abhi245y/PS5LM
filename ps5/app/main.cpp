@@ -748,6 +748,8 @@ int main(int, char **) {
                 std::thread(probe_fetch, u).detach();
             } else if (!take_request_file("/data/PS5LM/bench-write").empty()) {
                 std::thread(probe_write).detach();
+            } else if (std::string q = take_request_file("/data/PS5LM/search"); !q.empty()) {
+                market.search(q == "-" ? std::string() : q);  // a query typed on the PC
             }
         }
         if (req.kind == Dashboard::Request::unload || req.kind == Dashboard::Request::load) {

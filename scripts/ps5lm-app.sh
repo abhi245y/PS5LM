@@ -11,6 +11,7 @@
 #   scripts/ps5lm-app.sh press <button>      press a button (up, down, cross, l1, r1, ...)
 #   scripts/ps5lm-app.sh fetch <url>         probe: download over HTTPS (system TLS), see app.log
 #   scripts/ps5lm-app.sh bench-write         probe: write speed by method, see app.log
+#   scripts/ps5lm-app.sh search <words>      search Get models from the PC
 #
 # The app is never killed: it polls /data/PS5LM/quit and leaves through
 # sceSystemServiceLoadExec("exit"), since killing a title that is rendering
@@ -79,11 +80,12 @@ case ${1:-} in
     unload) request unload ;;
     fetch) request fetch "${2:?https URL}" ;;
     bench-write) request bench-write ;;
+    search) request search "${2:?search words}" ;;
     press) request press "${2:?up|down|left|right|cross|circle|triangle|square|l1|r1|l2|r2}" ;;
     screenshot) screenshot "${2:-}" ;;
     close) close ;;
     deploy) deploy ;;
     launch) launch ;;
     cycle) close; deploy; launch ;;
-    *) echo "usage: $0 close|deploy|launch|cycle|screenshot|load|unload|press|fetch|bench-write" >&2; exit 2 ;;
+    *) echo "usage: $0 close|deploy|launch|cycle|screenshot|load|unload|press|fetch|bench-write|search" >&2; exit 2 ;;
 esac

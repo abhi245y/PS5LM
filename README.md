@@ -34,7 +34,9 @@ For comparison, the 27B on the CPU as a payload, streamed from disk, made about 
   </tr>
 </table>
 
-- **Dashboard:** generation speed, how busy the GPU is, CPU use, the memory pool and how the model, KV cache and the rest split it, context in use, the loaded model, and load progress.
+- **Dashboard:** generation speed, how busy the GPU is, CPU use and clock, the memory pool and how the model, KV cache and the rest split it, context in use, storage, temperatures and fan, the loaded model (Cross for every argument it runs with), and load progress.
+- **Pages on L1/R1:** Settings (load a model at launch, which one, the longest context, KV cache type, sounds; kept in `settings.json`) and Logs (`app.log` and `llama.log`, with an errors-only filter).
+- **Sensors:** a title may not read the temperature and fan sensors, so the app carries [ps5-exporter](https://github.com/Marice/ps5-exporter) (Marice, GPL-3.0) and hands it to elfldr when it is not running. Without elfldr the THERMALS tile stays empty.
 - **Model library:** every `.gguf` in `/data/PS5LM/models` and in `PS5LM/models` on a USB drive, in two sections. Cross loads or unloads. A model on USB loads straight from the drive.
 - **Planner:** picks the longest context and the best KV cache type that fit the memory free, for each model.
 - **Presets:** sampling settings for Qwen 3.5/3.6/3.8, Gemma 4, gpt-oss, Granite, Nemotron, Mistral and Llama.

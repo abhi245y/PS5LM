@@ -7,6 +7,24 @@ v0.1.x are the upstream payload releases by cobanov.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-10
+
+### Added
+- POWER card: the SoC's power (CPU, GPU and memory together), its history,
+  energy used this session and joules per generated token; expanded, min,
+  average and max, fan duty and every temperature sensor. The reading is
+  `sceKernelGetSocPowerConsumption`'s low 32 bits in milliwatts (22 W idle,
+  86 W while the 27B generates), through ps5-exporter.
+- USAGE card: GPU and CPU on one chart; expanded, GPU, CPU, memory, storage
+  and the models on disk.
+
+### Changed
+- USAGE replaces the GPU and CPU tiles; THERMALS shows the hottest sensor.
+
+### Fixed
+- Speed and GPU use during a long reply: llama-server's counters move only
+  when a request ends, so the live figures come from the slot's token count.
+
 ## [0.3.0] - 2026-10-10
 
 ### Added

@@ -42,6 +42,12 @@ void push(std::vector<float> & v, float x) {
     }
 }
 
+// sceKernelGetSocPowerConsumption's first word: milliwatts in the low half.
+float soc_watts(uint64_t raw) {
+    const uint64_t mw = raw & 0xffffffffu;
+    return mw >= 1000 && mw <= 350000 ? (float) (mw / 1000.0) : 0.0f;
+}
+
 // Free and total GiB of the filesystem holding `path`, or zeros.
 void space(const char * path, double * free, double * total) {
     struct statvfs v = {};
@@ -230,7 +236,7 @@ void StatsCollector::run() {
     double last_wall = start, last_cpu = cpu_seconds();
     double last_busy = 0, last_tokens = 0, last_gen_s = 0;
     bool   have_last = false, last_working = false;
-    double last_ptok = 0, last_psec = 0;
+    double last_ptok = 0, last_psec = 0, last_decoded = 0;
     for (;;) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
         const double wall = now_s(), cpu = cpu_seconds();
@@ -268,11 +274,12 @@ void StatsCollector::run() {
         if (sceKernelGetCpuTemperature(&t) == 0 && t > -100 && t < 200) {
             cpu_t = (float) t;
         }
-        // The unit is not documented; milliwatts is the community reading,
-        // so only plausible values are shown.
+        // Milliwatts in the low 32 bits; the high half counts slowly (a
+        // sample number). Measured on the console: 22 W idle, 86 W while the
+        // 27B generates.
         uint64_t raw[16] = {};
-        if (sceKernelGetSocPowerConsumption(raw, 0.0) == 0 && raw[0] >= 1000 && raw[0] <= 350000) {
-            watts = (float) (raw[0] / 1000.0);
+        if (sceKernelGetSocPowerConsumption(raw, 0.0) == 0) {
+            watts = soc_watts(raw[0]);
         }
         const long hz = sceKernelGetCpuFrequency();
         ghz = hz > 0 ? (float) (hz / 1e9) : 0.0f;
@@ -289,6 +296,7 @@ void StatsCollector::run() {
         // Marice/ps5-exporter, when loaded, serves them on port 9100.
         float fan = -1;
         bool  from_exporter = false;
+        std::vector<std::pair<std::string, float>> temps;
         if (soc_t < -100) {
             std::string p = http_get(9100, "/metrics");
             // Not running: hand the bundled copy to elfldr, at start and then
@@ -302,7 +310,14 @@ void StatsCollector::run() {
                 from_exporter = true;
                 soc_t = (float) sample(p, "ps5_temperature_celsius{sensor=\"soc0\"}", -1000);
                 cpu_t = (float) sample(p, "ps5_temperature_celsius{sensor=\"cpu\"}", -1000);
-                watts = (float) sample(p, "ps5_soc_power_watts", 0);
+                watts = soc_watts((uint64_t) sample(p, "ps5_soc_power_raw_value", 0));
+                for (int k = -1; k < 16; ++k) {
+                    const std::string name = k < 0 ? std::string("cpu") : "soc" + std::to_string(k);
+                    const double t = sample(p, "ps5_temperature_celsius{sensor=\"" + name + "\"}", -1000);
+                    if (t > -100) {
+                        temps.emplace_back(name, (float) t);
+                    }
+                }
                 fan   = (float) sample(p, "ps5_fan_duty_ratio", -1);
                 if (ghz <= 0) {
                     ghz = (float) (sample(p, "ps5_cpu_frequency_hertz", 0) / 1e9);
@@ -324,6 +339,11 @@ void StatsCollector::run() {
         live_.soc_power_w = watts;
         live_.cpu_ghz = ghz;
         live_.fan = fan;
+        live_.temps = temps;
+        if (watts > 0) {
+            push(live_.power_history, watts);
+            live_.energy_wh += watts * dt / 3600.0;
+        }
         live_.sensors_from_exporter = from_exporter;
         if (soc_t > -100) {
             push(live_.temp_history, soc_t);
@@ -368,6 +388,14 @@ void StatsCollector::run() {
                 live_.gen_tps = dgen > 0.05 ? (float) ((tokens - last_tokens) / dgen) : 0.0f;
             }
             live_.ctx_used = (uint32_t) (json_int(slots, "n_prompt_tokens") + json_int(slots, "n_decoded"));
+            // The server's counters move only when a request ends, so during a
+            // long reply the speed comes from the slot's decoded count.
+            const double decoded = (double) json_int(slots, "n_decoded");
+            if (working && have_last && decoded > last_decoded && dt > 0) {
+                live_.gen_tps  = (float) ((decoded - last_decoded) / dt);
+                live_.gpu_busy = 1.0f;  // ponytail: a decoding slot keeps the GPU busy; no finer reading mid-request
+            }
+            last_decoded = working ? decoded : 0;
             have_last   = true;
             last_busy   = busy_s;
             last_tokens = tokens;

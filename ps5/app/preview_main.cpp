@@ -72,7 +72,11 @@ ps5lm::Live sample(float seconds, bool generating) {
                "--min-p", "0", "--metrics" };
     L.soc_temp    = 61;
     L.cpu_temp    = 54;
-    L.soc_power_w = 118;
+    L.soc_power_w = 86;
+    L.energy_wh   = 0.42;
+    L.fan         = 0.23f;
+    L.temps = { { "cpu", 54 }, { "soc0", 61 }, { "soc1", 60 }, { "soc2", 59 }, { "soc3", 62 }, { "soc4", 61 },
+                { "soc5", 60 }, { "soc6", 58 } };
     L.cpu_ghz     = 3.5f;
     L.data_free   = 412;
     L.data_total  = 825;
@@ -95,6 +99,7 @@ ps5lm::Live sample(float seconds, bool generating) {
         L.gpu_history.push_back(on ? 0.92f + 0.05f * std::sin(i * 0.3f) : 0.03f);
         L.cpu_history.push_back(on ? 0.11f + 0.03f * std::sin(i * 0.5f) : 0.02f);
         L.temp_history.push_back(on ? 60.0f + 2.0f * std::sin(i * 0.2f) : 52.0f);
+        L.power_history.push_back(on ? 85.0f + 1.5f * std::sin(i * 0.4f) : 23.0f);
     }
     L.gen_tps  = generating ? 20.7f : 0.0f;
     L.gpu_busy = generating ? 0.94f : 0.02f;
@@ -246,9 +251,15 @@ int main(int argc, char ** argv) {
     g_loading = -1;
     step(120, {}, true);
     shot("01-dashboard");
-    // To the Model tile: right twice along the top, then down.
+    // USAGE, POWER, then down to the Model tile.
     step(20, nav(hui::Direction::right), true);
+    step(40, press(hui::Action::confirm), true);
+    shot("02a-usage");
+    step(30, press(hui::Action::back), true);
     step(20, nav(hui::Direction::right), true);
+    step(40, press(hui::Action::confirm), true);
+    shot("02b-power");
+    step(30, press(hui::Action::back), true);
     step(40, nav(hui::Direction::down), false);
     shot("02-model-focus");
     step(60, press(hui::Action::confirm), false);

@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ps5lm {
@@ -68,6 +69,9 @@ struct Live {
     float fan = -1;              // fan duty 0..1, below 0 when unread
     bool  sensors_from_exporter = false;  // read from ps5-exporter, not the kernel
     std::vector<float> temp_history;  // SoC degrees C per second
+    std::vector<float> power_history; // SoC watts per second
+    double energy_wh = 0;             // SoC energy since the app started
+    std::vector<std::pair<std::string, float>> temps;  // every sensor that answered ("cpu", "soc0", ...)
 
     // Storage, GiB; usb_total 0 when no drive is mounted.
     double data_free = 0, data_total = 0;

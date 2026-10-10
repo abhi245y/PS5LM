@@ -51,7 +51,7 @@ constexpr float kLabelY = 46.0f, kLabelSize = 17.0f, kLift = 0.02f;
 constexpr float kTau = 6.2831853f;
 constexpr const char * kDash = "\xE2\x80\x94";
 
-enum Tile : int { kSpeed, kGpu, kCpu, kMemory, kContext, kStorage, kThermals, kModel };
+enum Tile : int { kSpeed, kUsage, kPower, kMemory, kContext, kStorage, kThermals, kModel };
 
 struct TileSpec {
     const char *  label;
@@ -62,8 +62,8 @@ struct TileSpec {
 // In reading order: ties in the navigation go to the earlier tile.
 constexpr TileSpec kSpec[Dashboard::kTiles] = {
     { "GENERATION", 0, 0, 6, 2, 0x4fe0ff },
-    { "GPU", 6, 0, 3, 2, 0x4fe0ff },
-    { "CPU", 9, 0, 3, 2, 0xb8f26b },
+    { "USAGE", 6, 0, 3, 2, 0x4fe0ff },
+    { "POWER", 9, 0, 3, 2, 0xffd166 },
     { "MEMORY", 0, 2, 6, 1, 0xffc24a },
     { "CONTEXT", 0, 3, 3, 1, 0x8288f0 },
     { "STORAGE", 3, 3, 3, 1, 0xff6f9c },
@@ -272,7 +272,7 @@ void Dashboard::update(const hui::InputFrame & input, float dt, ui::Feedback & f
 void Dashboard::update_dashboard(const hui::InputFrame & input, ui::Feedback & feedback) {
     const int rows = (int) live_.models.size();
     if (details_open_) {
-        if (input.is_pressed(Action::north)) {
+        if (input.is_pressed(Action::north) && detail_tile_ == kModel) {
             details_open_ = false;
             open_library();
             feedback.play(hui::audio::Cue::open);
@@ -337,6 +337,13 @@ void Dashboard::update_dashboard(const hui::InputFrame & input, ui::Feedback & f
             refusal_y_ = input.nav == Direction::down ? 1.0f : input.nav == Direction::up ? -1.0f : 0.0f;
         }
     }
+    // USAGE and POWER expand on Cross.
+    if ((focus_ == kUsage || focus_ == kPower) && input.is_pressed(Action::confirm)) {
+        details_open_ = true;
+        detail_tile_ = focus_;
+        feedback.play(hui::audio::Cue::open);
+        return;
+    }
     // The Model tile: Cross shows the loaded model's details (or the library
     // when nothing is loaded), Triangle the library.
     if (focus_ == kModel && input.is_pressed(Action::north)) {
@@ -347,6 +354,7 @@ void Dashboard::update_dashboard(const hui::InputFrame & input, ui::Feedback & f
             open_library();
         } else {
             details_open_ = true;
+            detail_tile_ = kModel;
         }
         feedback.play(hui::audio::Cue::open);
     }
@@ -698,22 +706,46 @@ void Dashboard::draw_content(gfx::DrawList & list, int tile, const Rect & r, flo
             caps(list, f, "PROMPT", r.x + r.w - kPad - uw - pw - 26, r.y + 352, 15, kInk.with_alpha(kMuted), gfx::Align::right);
             break;
         }
-        case kGpu: {
-            const float gw = number(list, f, serving, "%.0f", L.gpu_busy * 100.0f * up, r.x + kPad, r.y + 118, 60, kInk);
-            ui::text(list, f.regular, "% busy computing", r.x + kPad + gw + 10, r.y + 118, 22, kInk.with_alpha(kMuted));
-            ui::text(list, f.regular, "PlayStation 5 GPU, Vulkan (RADV)", r.x + kPad, r.y + 152, 20, kInk.with_alpha(kFaint));
-            history(list, L.gpu_history, { r.x + kPad, r.y + 196, r.w - 2 * kPad, 156 }, 1.0f, kCyan, t);
-            break;
-        }
-        case kCpu: {
-            const float cw = number(list, f, true, "%.0f", L.cpu_use * 100.0f * up, r.x + kPad, r.y + 118, 60, kInk);
-            std::snprintf(text, sizeof(text), "%% of %d CPUs", L.cpus);
-            ui::text(list, f.regular, text, r.x + kPad + cw + 10, r.y + 118, 22, kInk.with_alpha(kMuted));
-            ui::text(list, f.regular, "Zen 2, the app's share", r.x + kPad, r.y + 152, 20, kInk.with_alpha(kFaint));
-            history(list, L.cpu_history, { r.x + kPad, r.y + 186, r.w - 2 * kPad, 90 }, 1.0f, kLime, t);
+        case kUsage: {
+            // The GPU and the CPU side by side over one chart: cyan the GPU,
+            // lime the app's CPUs.
+            const float half = (r.w - 2 * kPad) * 0.5f;
+            caps(list, f, "GPU", r.x + kPad, r.y + 86, 15, kCyan);
+            caps(list, f, "CPU", r.x + kPad + half, r.y + 86, 15, kLime);
+            float w = number(list, f, serving, "%.0f", L.gpu_busy * 100.0f * up, r.x + kPad, r.y + 140, 52, kInk);
+            ui::text(list, f.regular, "%", r.x + kPad + w + 6, r.y + 140, 22, kInk.with_alpha(kMuted));
+            w = number(list, f, true, "%.0f", L.cpu_use * 100.0f * up, r.x + kPad + half, r.y + 140, 52, kInk);
+            ui::text(list, f.regular, "%", r.x + kPad + half + w + 6, r.y + 140, 22, kInk.with_alpha(kMuted));
+            const Rect g{ r.x + kPad, r.y + 170, r.w - 2 * kPad, 110 };
+            history(list, L.cpu_history, g, 1.0f, kLime, t);
+            history(list, L.gpu_history, g, 1.0f, kCyan, t);
             list.rounded_rect({ r.x + kPad, r.y + 300, r.w - 2 * kPad, 1 }, 0, kInk.with_alpha(0.1f));
             caps(list, f, "CLOCK", r.x + kPad, r.y + 338, 15, kInk.with_alpha(kMuted));
-            number(list, f, L.cpu_ghz > 0, "%.1f GHz", L.cpu_ghz, r.x + r.w - kPad, r.y + 340, 24, kInk, gfx::Align::right);
+            std::snprintf(text, sizeof(text), "%d CPUs, %.1f GHz", L.cpus, L.cpu_ghz);
+            ui::text(list, f.mono, L.cpu_ghz > 0 ? text : kDash, r.x + r.w - kPad, r.y + 340, 22, kInk, gfx::Align::right);
+            break;
+        }
+        case kPower: {
+            const bool known = L.soc_power_w > 0;
+            const float pw = number(list, f, known, "%.0f", L.soc_power_w * up, r.x + kPad, r.y + 118, 60, kInk);
+            ui::text(list, f.regular, "W, the SoC", r.x + kPad + pw + 10, r.y + 118, 22, kInk.with_alpha(kMuted));
+            if (known && L.state == ServerState::generating && L.gen_tps > 0) {
+                std::snprintf(text, sizeof(text), "%.1f J per token", L.soc_power_w / L.gen_tps);
+            } else if (known) {
+                std::snprintf(text, sizeof(text), "CPU, GPU and memory together");
+            } else {
+                std::snprintf(text, sizeof(text), "Load ps5-exporter to read it");
+            }
+            ui::text(list, f.regular, text, r.x + kPad, r.y + 152, 20, kInk.with_alpha(kFaint));
+            float peak = 60;
+            for (float v : L.power_history) {
+                peak = std::max(peak, v);
+            }
+            history(list, L.power_history, { r.x + kPad, r.y + 186, r.w - 2 * kPad, 90 }, peak * 1.15f,
+                    Color::rgb(0xffd166), t);
+            list.rounded_rect({ r.x + kPad, r.y + 300, r.w - 2 * kPad, 1 }, 0, kInk.with_alpha(0.1f));
+            caps(list, f, "THIS SESSION", r.x + kPad, r.y + 338, 15, kInk.with_alpha(kMuted));
+            number(list, f, L.energy_wh > 0, "%.2f Wh", L.energy_wh, r.x + r.w - kPad, r.y + 340, 22, kInk, gfx::Align::right);
             break;
         }
         case kMemory: {
@@ -813,9 +845,19 @@ void Dashboard::draw_content(gfx::DrawList & list, int tile, const Rect & r, flo
             ui::text(list, f.regular, text, r.x + kPad, r.y + 152, 20, kInk.with_alpha(kFaint));
             history(list, L.temp_history, { r.x + kPad, r.y + 186, r.w - 2 * kPad, 90 }, 100.0f, kHeat, t);
             list.rounded_rect({ r.x + kPad, r.y + 300, r.w - 2 * kPad, 1 }, 0, kInk.with_alpha(0.1f));
-            caps(list, f, "SOC POWER", r.x + kPad, r.y + 338, 15, kInk.with_alpha(kMuted));
-            number(list, f, L.soc_power_w > 0, "%.0f W", L.soc_power_w, r.x + r.w - kPad, r.y + 340, 24, kInk,
-                   gfx::Align::right);
+            // The hottest sensor, so a hot spot shows without opening POWER.
+            const std::pair<std::string, float> * hot = nullptr;
+            for (const auto & tp : L.temps) {
+                if (!hot || tp.second > hot->second) {
+                    hot = &tp;
+                }
+            }
+            caps(list, f, "HOTTEST", r.x + kPad, r.y + 338, 15, kInk.with_alpha(kMuted));
+            if (hot) {
+                const std::string who = hot->first == "cpu" ? std::string("CPU") : "SoC " + hot->first.substr(3);
+                std::snprintf(text, sizeof(text), "%s, %.0f \xC2\xB0" "C", who.c_str(), hot->second);
+            }
+            ui::text(list, f.mono, hot ? text : kDash, r.x + r.w - kPad, r.y + 340, 22, kInk, gfx::Align::right);
             break;
         }
         default: {  // kModel
@@ -1046,6 +1088,16 @@ void Dashboard::draw_details(gfx::DrawList & list, std::uint32_t glass) const {
     if (glass) {
         list.glass(glass, panel, 40, Color::rgb(0xffffff));
     }
+    if (detail_tile_ == kUsage || detail_tile_ == kPower) {
+        draw_panel(list, panel, 40, 1.0f, accent_of(detail_tile_));
+        if (detail_tile_ == kUsage) {
+            draw_usage_details(list, panel);
+        } else {
+            draw_power_details(list, panel);
+        }
+        list.pop_opacity();
+        return;
+    }
     draw_panel(list, panel, 40, 1.0f, kLime);
     caps(list, f, "LOADED MODEL", panel.x + 56, panel.y + 60, 20, kLime);
     ui::text(list, f.semibold, f.semibold.font->fit(L.preset.empty() ? L.model_label : L.preset, 40, panel.w - 112),
@@ -1087,6 +1139,143 @@ void Dashboard::draw_details(gfx::DrawList & list, std::uint32_t glass) const {
         ui::text(list, f.mono, f.mono.font->fit(lines[i], 18, col_w - 16), x, y, 18, kInk.with_alpha(0.9f));
     }
     list.pop_opacity();
+}
+
+// Everything the console is doing, one section each.
+void Dashboard::draw_usage_details(gfx::DrawList & list, const Rect & panel) const {
+    const ui::Fonts & f = fonts_;
+    const Live & L = live_;
+    const bool serving = L.state == ServerState::ready || L.state == ServerState::generating;
+    char text[96];
+    caps(list, f, "USAGE", panel.x + 56, panel.y + 60, 20, kCyan);
+    ui::text(list, f.regular, "What the console is doing for PS5LM, over the last two minutes.", panel.x + 56,
+             panel.y + 96, 20, kInk.with_alpha(kMuted));
+
+    const float x0 = panel.x + 56, colw = (panel.w - 112 - 48) * 0.5f, x1 = x0 + colw + 48;
+    // GPU and CPU, each with its chart.
+    const struct {
+        const char * name;
+        Color        c;
+        float        now;
+        bool         known;
+        const std::vector<float> * hist;
+        std::string  sub;
+        float        x;
+    } parts[2] = {
+        { "GPU", kCyan, L.gpu_busy, serving, &L.gpu_history,
+          "Vulkan (RADV), " + gib(L.model_gib + L.kv_gib) + " GiB on it", x0 },
+        { "CPU", kLime, L.cpu_use, true, &L.cpu_history,
+          std::to_string(L.cpus) + " CPUs" + (L.cpu_ghz > 0 ? ", " + gib(L.cpu_ghz) + " GHz" : std::string()) +
+              ", heap " + gib(L.heap_gib) + " GiB",
+          x1 },
+    };
+    for (const auto & p : parts) {
+        caps(list, f, p.name, p.x, panel.y + 160, 16, p.c);
+        const float w = number(list, f, p.known, "%.0f", p.now * 100.0f, p.x, panel.y + 222, 56, kInk);
+        ui::text(list, f.regular, "% busy", p.x + w + 10, panel.y + 222, 22, kInk.with_alpha(kMuted));
+        ui::text(list, f.regular, f.regular.font->fit(p.sub, 20, colw), p.x, panel.y + 256, 20, kInk.with_alpha(kFaint));
+        history(list, *p.hist, { p.x, panel.y + 280, colw, 150 }, 1.0f, p.c, 10.0f);
+    }
+
+    // Memory and storage.
+    list.rounded_rect({ x0, panel.y + 470, panel.w - 112, 1 }, 0, kInk.with_alpha(0.1f));
+    caps(list, f, "MEMORY", x0, panel.y + 514, 16, kAmber);
+    const double used = std::max(0.0, L.pool_gib - L.free_gib);
+    std::snprintf(text, sizeof(text), "%s of %s GiB, GPU and CPU", gib(used).c_str(), gib(L.pool_gib).c_str());
+    ui::text(list, f.mono, text, x0 + colw, panel.y + 514, 20, kInk, gfx::Align::right);
+    bar(list, { x0, panel.y + 534, colw, 12 }, L.pool_gib > 0 ? (float) (used / L.pool_gib) : 0.0f, kAmber);
+
+    caps(list, f, "STORAGE", x1, panel.y + 514, 16, kRose);
+    const struct {
+        const char * name;
+        double       free, total;
+    } drives[2] = { { "Internal", L.data_free, L.data_total }, { "USB", L.usb_free, L.usb_total } };
+    for (int k = 0; k < 2; ++k) {
+        const float y = panel.y + 570 + k * 70.0f;
+        ui::text(list, f.regular, drives[k].name, x1, y, 20, kInk.with_alpha(0.85f));
+        if (drives[k].total <= 0) {
+            ui::text(list, f.regular, "No drive", x1 + colw, y, 20, kInk.with_alpha(kFaint), gfx::Align::right);
+            continue;
+        }
+        std::snprintf(text, sizeof(text), "%.0f of %.0f GiB free", drives[k].free, drives[k].total);
+        ui::text(list, f.mono, text, x1 + colw, y, 20, kInk, gfx::Align::right);
+        bar(list, { x1, y + 16, colw, 10 }, (float) ((drives[k].total - drives[k].free) / drives[k].total), kRose);
+    }
+    caps(list, f, "MODELS", x0, panel.y + 610, 16, kInk.with_alpha(kMuted));
+    double on_disk = 0;
+    for (const auto & m : L.models) {
+        on_disk += m.size_gib;
+    }
+    std::snprintf(text, sizeof(text), "%zu found, %s GiB", L.models.size(), gib(on_disk).c_str());
+    ui::text(list, f.mono, text, x0 + colw, panel.y + 610, 20, kInk, gfx::Align::right);
+}
+
+// The SoC's power, the energy it took, and every temperature it reports.
+void Dashboard::draw_power_details(gfx::DrawList & list, const Rect & panel) const {
+    const ui::Fonts & f = fonts_;
+    const Live & L = live_;
+    const Color kGold = Color::rgb(0xffd166);
+    char text[96];
+    caps(list, f, "POWER", panel.x + 56, panel.y + 60, 20, kGold);
+    ui::text(list, f.regular, "The SoC's own reading: CPU, GPU and memory together.", panel.x + 56, panel.y + 96, 20,
+             kInk.with_alpha(kMuted));
+
+    const float x0 = panel.x + 56, lw = 640, x1 = x0 + lw + 64, rw = panel.x + panel.w - 56 - x1;
+    const float w = number(list, f, L.soc_power_w > 0, "%.0f", L.soc_power_w, x0, panel.y + 200, 72, kInk);
+    ui::text(list, f.regular, "W now", x0 + w + 12, panel.y + 200, 24, kInk.with_alpha(kMuted));
+    float mn = 1e9f, mx = 0, sum = 0;
+    for (float v : L.power_history) {
+        mn = std::min(mn, v);
+        mx = std::max(mx, v);
+        sum += v;
+    }
+    const size_t n = L.power_history.size();
+    history(list, L.power_history, { x0, panel.y + 236, lw, 200 }, std::max(60.0f, mx * 1.15f), kGold, 10.0f);
+    const char * names[3] = { "MIN", "AVG", "MAX" };
+    const float  vals[3] = { n ? mn : 0, n ? sum / (float) n : 0, mx };
+    for (int k = 0; k < 3; ++k) {
+        const float x = x0 + k * 190.0f;
+        caps(list, f, names[k], x, panel.y + 486, 15, kInk.with_alpha(kMuted));
+        number(list, f, n > 0, "%.0f W", vals[k], x + 56, panel.y + 488, 24, kInk);
+    }
+    const struct {
+        const char * name;
+        std::string  value;
+    } rows[3] = {
+        { "THIS SESSION", [&] { char t[24]; std::snprintf(t, sizeof(t), "%.2f Wh", L.energy_wh); return std::string(t); }() },
+        { "PER TOKEN", L.gen_tps > 0 && L.soc_power_w > 0 ? gib(L.soc_power_w / L.gen_tps) + " J while generating"
+                                                          : std::string(kDash) },
+        { "FAN", L.fan >= 0 ? std::to_string((int) (L.fan * 100.0f + 0.5f)) + "% duty" : std::string(kDash) },
+    };
+    for (int k = 0; k < 3; ++k) {
+        const float y = panel.y + 556 + k * 50.0f;
+        caps(list, f, rows[k].name, x0, y, 15, kInk.with_alpha(kMuted));
+        ui::text(list, f.mono, rows[k].value, x0 + lw, y + 2, 22, kInk, gfx::Align::right);
+    }
+
+    // Every sensor, hottest first by bar length.
+    list.rounded_rect({ x1 - 32, panel.y + 150, 1, panel.h - 220 }, 0, kInk.with_alpha(0.1f));
+    caps(list, f, "TEMPERATURES", x1, panel.y + 160, 15, kHeat);
+    if (L.temps.empty()) {
+        ui::text(list, f.regular, "No sensor answered", x1, panel.y + 200, 20, kInk.with_alpha(kFaint));
+    }
+    for (size_t k = 0; k < L.temps.size() && k < 12; ++k) {
+        const float y = panel.y + 204 + (float) k * 40.0f;
+        std::string name = L.temps[k].first;
+        if (name == "cpu") {
+            name = "CPU";
+        } else {
+            name = "SoC " + name.substr(3);
+        }
+        ui::text(list, f.regular, name, x1, y, 20, kInk.with_alpha(0.85f));
+        std::snprintf(text, sizeof(text), "%.0f \xC2\xB0" "C", L.temps[k].second);
+        ui::text(list, f.mono, text, x1 + rw, y, 20, kInk, gfx::Align::right);
+        bar(list, { x1 + 90, y - 8, rw - 180, 6 }, L.temps[k].second / 100.0f, kHeat);
+    }
+    ui::paragraph(list, f.regular,
+                  "The console reports the SoC's total only. CPU and GPU power apart, and voltages, are not available to "
+                  "homebrew.",
+                  x0, panel.y + panel.h - 52, 17, panel.w - 112, 24, kInk.with_alpha(kFaint), 2);
 }
 
 void Dashboard::draw_settings(gfx::DrawList & list) const {
@@ -1233,7 +1422,8 @@ void Dashboard::draw_hints(DashboardFrame & frame) const {
         ui::draw_hints(frame.overlay, fonts_, style, hints, 3, kGridX + kGridW, true);
     } else if (details_.value > 0.5f) {
         const ui::Hint hints[] = { { ui::Button::triangle, "Library" }, { ui::Button::circle, "Back" } };
-        ui::draw_hints(frame.overlay, fonts_, style, hints, 2, kGridX + kGridW, true);
+        const bool model = detail_tile_ == kModel;
+        ui::draw_hints(frame.overlay, fonts_, style, model ? hints : hints + 1, model ? 2 : 1, kGridX + kGridW, true);
     } else if (page_ == 1) {
         const bool toggle = in_rows_ && is_toggle(kCategories[setting_category_].rows[setting_row_].id);
         if (!in_rows_) {
@@ -1259,8 +1449,9 @@ void Dashboard::draw_hints(DashboardFrame & frame) const {
                                    { ui::Button::triangle, "Library" } };
         ui::draw_hints(frame.scene, fonts_, style, hints, loaded ? 3 : 2, kGridX + kGridW, true);
     } else {
-        const ui::Hint hints[] = { { ui::Button::dpad, "Move" } };
-        ui::draw_hints(frame.scene, fonts_, style, hints, 1, kGridX + kGridW, true);
+        const ui::Hint hints[] = { { ui::Button::dpad, "Move" }, { ui::Button::cross, "Expand" } };
+        const bool expands = focus_ == kUsage || focus_ == kPower;
+        ui::draw_hints(frame.scene, fonts_, style, hints, expands ? 2 : 1, kGridX + kGridW, true);
     }
 }
 

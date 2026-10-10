@@ -13,7 +13,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <pthread.h>
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -23,6 +25,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <span>
@@ -35,6 +38,8 @@
 #include <GL/glcorearb.h>
 
 #include "dashboard.hpp"
+#include "fetch.hpp"
+#include "market.hpp"
 #include "display.hpp"
 #include "ggml-backend.h"
 #include "model_plan.hpp"
@@ -97,6 +102,9 @@ constexpr const char * kArgs        = "/data/PS5LM/app-args.txt";
 constexpr const char * kChoice      = "/data/PS5LM/model.txt";
 constexpr const char * kQuit        = "/data/PS5LM/quit";
 constexpr const char * kSettings    = "/data/PS5LM/settings.json";
+constexpr const char * kScratch     = "/data/PS5LM/scratch";
+// The file tools only: a title cannot start processes (no shell command).
+constexpr const char * kTools       = "read_file,write_file,edit_file,file_glob_search,grep_search,get_info";
 constexpr const char * kLlamaLog    = "/data/PS5LM/llama.log";
 constexpr const char * kModels      = "/data/PS5LM/models";
 constexpr const char * kAssets      = "/app0/assets";
@@ -123,6 +131,86 @@ std::vector<std::string> tail_lines(const char * path) {
         lines.emplace_back(text, start, end - start);
     }
     return lines;
+}
+
+// Probe: download a URL over HTTPS to /data/PS5LM/fetch.out, logging the
+// status, size and speed (scripts/ps5lm-app.sh fetch <url>).
+void probe_fetch(std::string url) {
+    FILE * out = std::fopen("/data/PS5LM/fetch.out", "wb");
+    const FetchResult r = https_get(url, "", [&](const char * p, size_t n) { return out && std::fwrite(p, 1, n, out) == n; });
+    if (out) {
+        std::fclose(out);
+    }
+    std::printf("ps5lm-app: fetch %s: status %d, length %lld, %llu bytes in %.1f s (%.2f MB/s)%s%s\n", url.c_str(),
+                r.status, (long long) r.length, (unsigned long long) r.bytes, r.seconds,
+                r.seconds > 0 ? r.bytes / 1e6 / r.seconds : 0.0, r.error.empty() ? "" : ", ", r.error.c_str());
+}
+
+// Probe: how fast the app can write, by method and place, fsync included
+// (scripts/ps5lm-app.sh bench-write). 128 MiB each.
+void probe_write() {
+    const size_t total = 128u << 20;
+    std::vector<char> buf(8u << 20, 'x');
+    const char * dirs[] = { "/data/PS5LM", "/mnt/usb0" };
+    for (const char * dir : dirs) {
+        struct statvfs v = {};
+        if (statvfs(dir, &v) != 0) {
+            continue;
+        }
+        const std::string path = std::string(dir) + "/write-bench.tmp";
+        struct Method {
+            const char * name;
+            size_t       chunk;
+            bool         stdio;
+            int          flags;
+        } methods[] = {
+            { "stdio 8M", 8u << 20, true, 0 },
+            { "write 1M", 1u << 20, false, 0 },
+            { "write 8M", 8u << 20, false, 0 },
+            { "write 8M direct", 8u << 20, false, O_DIRECT },
+        };
+        for (const auto & m : methods) {
+            const auto t0 = std::chrono::steady_clock::now();
+            bool ok = true;
+            if (m.stdio) {
+                FILE * f = std::fopen(path.c_str(), "wb");
+                for (size_t done = 0; f && ok && done < total; done += m.chunk) {
+                    ok = std::fwrite(buf.data(), 1, m.chunk, f) == m.chunk;
+                }
+                ok = f && ok && std::fflush(f) == 0 && fsync(fileno(f)) == 0;
+                if (f) {
+                    std::fclose(f);
+                }
+            } else {
+                const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | m.flags, 0666);
+                for (size_t done = 0; fd >= 0 && ok && done < total; done += m.chunk) {
+                    ok = write(fd, buf.data(), m.chunk) == (ssize_t) m.chunk;
+                }
+                ok = fd >= 0 && ok && fsync(fd) == 0;
+                if (fd >= 0) {
+                    close(fd);
+                }
+            }
+            const double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+            std::printf("ps5lm-app: write-bench %s %s: %s, %.1f MB/s\n", dir, m.name, ok ? "ok" : strerror(errno),
+                        ok ? total / 1e6 / s : 0.0);
+            unlink(path.c_str());
+        }
+    }
+    std::printf("ps5lm-app: write-bench done\n");
+}
+
+// Bytes under a folder, or 0.
+uint64_t folder_bytes(const char * path) {
+    std::error_code ec;
+    uint64_t total = 0;
+    for (auto it = std::filesystem::recursive_directory_iterator(path, ec);
+         !ec && it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
+        if (it->is_regular_file(ec)) {
+            total += it->file_size(ec);
+        }
+    }
+    return total;
 }
 
 // A system notification on the TV.
@@ -342,6 +430,15 @@ struct Models {
         if (std::find(args.begin(), args.end(), "--metrics") == args.end()) {
             args.push_back("--metrics");
         }
+        // The browser chat's file tools, confined to the scratch folder by
+        // patches/0003 (LLAMA_TOOLS_ROOT) and working there by default.
+        if (settings.tools && std::find(args.begin(), args.end(), "--tools") == args.end()) {
+            std::error_code ec;
+            std::filesystem::create_directories(kScratch, ec);
+            setenv("LLAMA_TOOLS_ROOT", kScratch, 1);
+            chdir(kScratch);
+            args.insert(args.end(), { "--tools", kTools });
+        }
         for (const auto & a : args) {
             std::printf("ps5lm-app: arg %s\n", a.c_str());
         }
@@ -500,8 +597,12 @@ int main(int, char **) {
     sounds.load(std::string(kAssets) + "/audio/sfx");
 
     Dashboard dash(fonts);
+    Market    market;
+    market.start(models.budget_gib);
+    std::string last_download;
     dash.set_settings(models.settings);
     bool      library_shown = false;  // opened once at launch when no model is loaded
+    bool      scratch_warned = false;
     DashboardFrame frame;
     hui::ui::Feedback feedback;
     hui::PadSample samples[64];
@@ -555,6 +656,8 @@ int main(int, char **) {
                 { "square", hui::Action::west, hui::Direction::none },
                 { "l1", hui::Action::page_prev, hui::Direction::none },
                 { "r1", hui::Action::page_next, hui::Direction::none },
+                { "l2", hui::Action::jump_prev, hui::Direction::none },
+                { "r2", hui::Action::jump_next, hui::Direction::none },
             };
             for (const auto & k : keys) {
                 if (key == k.name) {
@@ -576,6 +679,31 @@ int main(int, char **) {
         }
         pad.tick(dt);
 
+        // The scratch folder: its size for the dashboard, and one warning each
+        // time it grows past the limit.
+        if (n % 600 == 300) {
+            const double gib = folder_bytes(kScratch) / 1073741824.0;
+            stats.set_scratch(gib);
+            const bool over = gib > models.settings.scratch_limit_gib;
+            if (over && !scratch_warned) {
+                char text[128];
+                std::snprintf(text, sizeof(text), "PS5LM: the chat's scratch folder holds %.1f GiB; clear it in Settings", gib);
+                notify(text);
+            }
+            scratch_warned = over;
+        }
+        if (dash.page() == Dashboard::kMarketPage && n % 10 == 0) {
+            MarketView mv = market.snapshot();
+            // A finished download joins the library.
+            if (!mv.download_result.empty() && mv.download_result != last_download) {
+                last_download = mv.download_result;
+                if (mv.download_result.rfind("Saved", 0) == 0) {
+                    models.scan(stats);
+                    notify(("PS5LM: " + mv.download_result).c_str());
+                }
+            }
+            dash.set_market(std::move(mv));
+        }
         if (dash.page() == Dashboard::kLogsPage && n % 60 == 0) {
             dash.set_logs(tail_lines(kLog), tail_lines(kLlamaLog));
         }
@@ -589,12 +717,39 @@ int main(int, char **) {
             models.scan(stats);
             std::printf("ps5lm-app: settings saved\n");
         }
+        switch (req.kind) {
+            case Dashboard::Request::market_search: market.search(req.path); break;
+            case Dashboard::Request::market_open: market.open_repo(req.repo); break;
+            case Dashboard::Request::market_plan: market.plan_file(req.repo, req.file); break;
+            case Dashboard::Request::market_download: {
+                std::error_code ec;
+                std::filesystem::create_directories(models.settings.download_dir, ec);
+                market.download(req.repo, req.file, models.settings.download_dir);
+                break;
+            }
+            default: break;
+        }
+        if (req.kind == Dashboard::Request::clear_scratch) {
+            std::error_code ec;
+            for (const auto & e : std::filesystem::directory_iterator(kScratch, ec)) {
+                std::filesystem::remove_all(e.path(), ec);
+            }
+            stats.set_scratch(folder_bytes(kScratch) / 1073741824.0);
+            notify("PS5LM: scratch folder cleared");
+            std::printf("ps5lm-app: scratch folder cleared\n");
+        }
         // The same requests from the PC (scripts/ps5lm-app.sh load|unload).
         if (n % 60 == 30 && req.kind == Dashboard::Request::none) {
             if (std::string p = take_request_file("/data/PS5LM/load"); !p.empty()) {
                 req = { Dashboard::Request::load, p };
             } else if (!take_request_file("/data/PS5LM/unload").empty()) {
                 req = { Dashboard::Request::unload, "" };
+            } else if (std::string u = take_request_file("/data/PS5LM/fetch"); !u.empty()) {
+                std::thread(probe_fetch, u).detach();
+            } else if (!take_request_file("/data/PS5LM/bench-write").empty()) {
+                std::thread(probe_write).detach();
+            } else if (std::string q = take_request_file("/data/PS5LM/search"); !q.empty()) {
+                market.search(q == "-" ? std::string() : q);  // a query typed on the PC
             }
         }
         if (req.kind == Dashboard::Request::unload || req.kind == Dashboard::Request::load) {

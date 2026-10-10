@@ -193,6 +193,33 @@ int main(int argc, char ** argv) {
     app_log.push_back("ps5lm-app: accept failed, errno 53");
     app_log.push_back("W srv          stop: cancel task, id_task = 22182");
     dash.set_logs(app_log, llama_log);
+    ps5lm::MarketView mv;
+    const char * ids[] = { "unsloth/Qwen3.8-27B-GGUF", "unsloth/gemma-4-E4B-it-GGUF", "bartowski/Llama-3.2-3B-Instruct-GGUF",
+                           "ggml-org/gpt-oss-20b-GGUF", "unsloth/Qwen3.5-9B-GGUF", "bartowski/Mistral-7B-Instruct-v0.3-GGUF" };
+    for (int i = 0; i < 6; ++i) {
+        ps5lm::MarketRepo r;
+        r.id = ids[i];
+        r.downloads = 812000 / (i + 1);
+        mv.repos.push_back(r);
+    }
+    mv.open = 0;
+    const char * fnames[] = { "Qwen3.8-27B-UD-IQ2_XXS.gguf", "Qwen3.8-27B-UD-Q2_K_XL.gguf", "Qwen3.8-27B-Q3_K_M.gguf", "Qwen3.8-27B-Q4_K_M.gguf" };
+    const double fsz[] = { 6.8, 9.2, 12.6, 15.4 };
+    const int ffits[] = { 1, 1, 0, 0 };
+    const char * fplans[] = { "64k context, q8_0 cache: 9.9 of 11.0 GiB", "32k context, q4_0 cache: 10.8 of 11.0 GiB",
+                              "too big: the weights alone need more than is free", "too big: the weights alone need more than is free" };
+    for (int i = 0; i < 4; ++i) {
+        ps5lm::MarketFile f;
+        f.name = fnames[i];
+        f.bytes = (uint64_t) (fsz[i] * 1073741824.0);
+        f.fits = ffits[i];
+        f.plan = fplans[i];
+        mv.repos[0].files.push_back(f);
+    }
+    mv.download_file = "Qwen3.8-27B-UD-IQ2_XXS.gguf";
+    mv.download_progress = 0.37f;
+    mv.download_mbps = 14.2;
+    dash.set_market(mv);
     std::vector<unsigned char> pixels((size_t) W * H * 4);
     stbi_flip_vertically_on_write(1);
     hui::ui::Feedback feedback;
@@ -282,9 +309,20 @@ int main(int argc, char ** argv) {
     step(20, nav(hui::Direction::down), false);
     step(30, press(hui::Action::confirm), false);
     shot("08-settings-model");
+    step(20, press(hui::Action::back), false);
+    step(20, nav(hui::Direction::down), false);
+    step(20, press(hui::Action::confirm), false);
+    step(20, nav(hui::Direction::down), false);
+    step(30, nav(hui::Direction::down), false);
+    shot("08-settings-chat");
     step(40, press(hui::Action::page_next), false);
     shot("09-logs");
     step(30, press(hui::Action::north), false);
     shot("10-logs-errors");
+    step(40, press(hui::Action::page_next), false);
+    shot("11-market");
+    step(30, press(hui::Action::confirm), false);
+    step(20, nav(hui::Direction::down), false);
+    shot("12-market-files");
     return ok ? 0 : 1;
 }

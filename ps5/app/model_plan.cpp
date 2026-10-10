@@ -2,6 +2,7 @@
 #include "model_plan.hpp"
 
 #include <dirent.h>
+#include <sys/stat.h>
 
 #include <algorithm>
 #include <cctype>
@@ -18,13 +19,26 @@ constexpr double kGiB = 1073741824.0;
 // GGUF metadata value types.
 enum : uint32_t { U8, I8, U16, I16, U32, I32, F32, BOOL, STRING, ARRAY, U64, I64, F64 };
 
+// A GGUF header from a file, or from memory (the start of a remote file);
+// the PS5's libc has no fmemopen.
 struct Reader {
-    FILE * f;
-    bool   bad = false;
+    FILE *       f   = nullptr;
+    const char * mem = nullptr;
+    size_t       size = 0, pos = 0;
+    bool         bad = false;
 
+    size_t read(void * out, size_t n) {
+        if (f) {
+            return std::fread(out, 1, n, f);
+        }
+        const size_t k = pos + n <= size ? n : 0;
+        std::memcpy(out, mem + pos, k);
+        pos += k;
+        return k;
+    }
     template <typename T> T get() {
         T v{};
-        if (std::fread(&v, sizeof(v), 1, f) != 1) {
+        if (read(&v, sizeof(v)) != sizeof(v)) {
             bad = true;
         }
         return v;
@@ -36,15 +50,16 @@ struct Reader {
             return {};
         }
         std::string s(n, '\0');
-        if (n && std::fread(s.data(), 1, n, f) != n) {
+        if (n && read(s.data(), n) != n) {
             bad = true;
         }
         return s;
     }
     void skip(uint64_t n) {
-        if (std::fseek(f, (long) n, SEEK_CUR) != 0) {
+        if (f ? std::fseek(f, (long) n, SEEK_CUR) != 0 : pos + n > size) {
             bad = true;
         }
+        pos += f ? 0 : n;
     }
 };
 
@@ -85,20 +100,68 @@ std::string lower(std::string s) {
 
 }  // namespace
 
-ModelInfo read_model_info(const std::string & path) {
+// The vision projector for a model: an "mmproj" .gguf in the same folder.
+// With several, the one whose name shares the longest start with the
+// model's, once "mmproj" and separators are set aside
+// ("mmproj-gemma-4-E4B-f16.gguf" for "gemma-4-E4B_q4_0-it.gguf").
+std::string find_mmproj(const std::string & model_path) {
+    const size_t slash = model_path.find_last_of('/');
+    const std::string dir = model_path.substr(0, slash);
+    const auto key = [](std::string n) {
+        n = lower(n);
+        if (const size_t at = n.find("mmproj"); at != std::string::npos) {
+            n.erase(at, 6);
+        }
+        n.erase(std::remove_if(n.begin(), n.end(), [](char c) { return c == '-' || c == '_' || c == '.'; }), n.end());
+        return n;
+    };
+    const std::string want = key(model_path.substr(slash + 1));
+    std::string best;
+    size_t      best_len = 0;
+    DIR * d = opendir(dir.c_str());
+    if (!d) {
+        return best;
+    }
+    while (dirent * e = readdir(d)) {
+        const std::string n = e->d_name;
+        if (lower(n).find("mmproj") == std::string::npos || n.size() < 6 || lower(n.substr(n.size() - 5)) != ".gguf") {
+            continue;
+        }
+        const std::string k = key(n);
+        size_t common = 0;
+        while (common < k.size() && common < want.size() && k[common] == want[common]) {
+            ++common;
+        }
+        // At least the family's name in common ("gemma4e4b"), so a lone
+        // projector of another model is not paired.
+        if (common >= 5 && common > best_len) {
+            best = dir + "/" + n;
+            best_len = common;
+        }
+    }
+    closedir(d);
+    return best;
+}
+
+namespace {
+
+// Reads a GGUF header from `f` (and closes it). `file_bytes` is the whole
+// file's size when `f` holds only its start; 0 to measure `f`.
+ModelInfo parse_model_info(Reader r, const std::string & path, uint64_t file_bytes) {
+    FILE * f = r.f;
     ModelInfo m;
     m.path      = path;
     m.file_name = path.substr(path.find_last_of('/') + 1);
     m.name      = m.file_name;
 
-    FILE * f = std::fopen(path.c_str(), "rb");
-    if (!f) {
+    if (!f && !r.mem) {
         m.error = "cannot open";
         return m;
     }
-    Reader r{ f };
     if (r.get<uint32_t>() != 0x46554747u) {  // "GGUF"
-        std::fclose(f);
+        if (f) {
+            std::fclose(f);
+        }
         m.error = "not a GGUF file";
         return m;
     }
@@ -133,9 +196,13 @@ ModelInfo read_model_info(const std::string & path) {
             ints[key] = read_int(r, t);
         }
     }
-    std::fseek(f, 0, SEEK_END);
-    m.file_bytes = (uint64_t) std::ftell(f);
-    std::fclose(f);
+    if (f) {
+        std::fseek(f, 0, SEEK_END);
+    }
+    m.file_bytes = file_bytes ? file_bytes : f ? (uint64_t) std::ftell(f) : r.size;
+    if (f) {
+        std::fclose(f);
+    }
     if (r.bad) {
         m.error = "metadata could not be read";
         return m;
@@ -176,6 +243,27 @@ ModelInfo read_model_info(const std::string & path) {
         m.error = "no layer count for architecture '" + m.arch + "'";
     }
     return m;
+}
+
+}  // namespace
+
+ModelInfo read_model_info(const std::string & path) {
+    Reader r;
+    r.f = std::fopen(path.c_str(), "rb");
+    ModelInfo m = parse_model_info(r, path, 0);
+    m.mmproj = find_mmproj(path);
+    if (!m.mmproj.empty()) {
+        struct stat st = {};
+        m.mmproj_bytes = stat(m.mmproj.c_str(), &st) == 0 ? (uint64_t) st.st_size : 0;
+    }
+    return m;
+}
+
+ModelInfo read_model_header(const std::string & name, const std::string & head, uint64_t file_bytes) {
+    Reader r;
+    r.mem  = head.data();
+    r.size = head.size();
+    return parse_model_info(r, name, file_bytes);
 }
 
 double kv_bytes_per_token(const ModelInfo & m, const std::string & type) {
@@ -230,12 +318,13 @@ Plan plan_model(const ModelInfo & m, double budget_gib, uint32_t ctx_cap, const 
     if (m.n_ctx_train) {
         ctx_cap = std::min(ctx_cap, m.n_ctx_train);
     }
-    p.weights_gib = m.file_bytes / kGiB;
+    p.weights_gib = (m.file_bytes + m.mmproj_bytes) / kGiB;
     p.state_gib   = m.state_bytes / kGiB;
     // Compute buffers and the CPU side (the title heap shares the pool), plus
     // one prompt checkpoint of the recurrent state. Calibrated on the console:
     // Qwen3.8-27B UD-Q2_K_XL at 64k with a q4_0 cache ran with 11.38 GiB free.
-    p.reserve_gib = 0.75 + p.state_gib;
+    // ponytail: 0.25 GiB for the image encoder's buffers is a guess; measure on the console.
+    p.reserve_gib = 0.75 + p.state_gib + (m.mmproj.empty() ? 0.0 : 0.25);
 
     // The longest context first, and at each length the best cache that fits.
     static const uint32_t ctxs[]  = { 131072, 65536, 32768, 16384, 8192, 4096 };
@@ -275,8 +364,8 @@ Plan plan_model(const ModelInfo & m, double budget_gib, uint32_t ctx_cap, const 
         p.why = why;
         return p;
     }
-    std::snprintf(why, sizeof(why), "%uk context, %s cache: %.1f of %.1f GiB", p.ctx / 1024, p.kv_type.c_str(),
-                  p.total_gib, budget_gib);
+    std::snprintf(why, sizeof(why), "%uk context, %s cache%s: %.1f of %.1f GiB", p.ctx / 1024, p.kv_type.c_str(),
+                  m.mmproj.empty() ? "" : ", images", p.total_gib, budget_gib);
     p.why = why;
 
     p.args = { "-m", m.path, "-ngl", "999", "-fit", "off", "-lm", "none",
@@ -286,6 +375,9 @@ Plan plan_model(const ModelInfo & m, double budget_gib, uint32_t ctx_cap, const 
                // (32 checkpoints, 8 GiB) are for a PC, and the CPU shares this pool.
                "-ctxcp", "1", "-cram", "0",
                "--host", "0.0.0.0", "--port", "8081" };
+    if (!m.mmproj.empty()) {
+        p.args.insert(p.args.end(), { "--mmproj", m.mmproj });
+    }
     if (preset) {
         p.args.insert(p.args.end(), preset->args.begin(), preset->args.end());
     }

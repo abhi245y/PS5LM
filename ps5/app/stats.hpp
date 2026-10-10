@@ -76,6 +76,7 @@ struct Live {
     // Storage, GiB; usb_total 0 when no drive is mounted.
     double data_free = 0, data_total = 0;
     double usb_free  = 0, usb_total  = 0;
+    double scratch_gib = 0;  // the chat tools' scratch folder
 
     // Memory, GiB.
     double pool_gib = 0;     // the title's direct memory
@@ -104,6 +105,7 @@ class StatsCollector {
     void set_model(const Live & model_part);   // model_* , ctx, kv_*, preset
     void set_models(const std::vector<ModelRow> & rows);
     void set_state(ServerState s);
+    void set_scratch(double gib);
 
   private:
     void run();

@@ -7,6 +7,31 @@ v0.1.x are the upstream payload releases by cobanov.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-10
+
+### Added
+- Get models page (the fourth on L1/R1): Hugging Face's GGUF repositories,
+  most downloaded or by family (L2/R2), each file's size and whether it fits,
+  planned from its first 16 MiB, and downloads to internal storage or USB
+  (Settings), SHA-256 checked, added to the library when done. HTTPS through
+  the system's own libSceHttp2 and libSceSsl. Checked on the console:
+  SmolLM2-135M F16 (271 MB) at 3.4 MB/s.
+- Chat tools: the browser chat's model can read, write, edit and search files
+  (llama-server's built-in tools), confined to `/data/PS5LM/scratch` by
+  `patches/0003-tools-root.patch`. Settings has a switch, a size warning
+  (default 2 GiB) and a Clear action.
+- Images: a vision model's `mmproj` file beside it is loaded with it
+  (`--mmproj`), and the planner counts its memory.
+- The planner can plan from the first bytes of a GGUF (a range request), the
+  base of the model market's fit column.
+
+### Measured
+- Writes from the app: stdio 18.5 MB/s, write() 232 MB/s on /data (USB: 293
+  and 621 MB/s). Downloads use write().
+- Chat tools on the console: a write to /data/homebrew lands in the scratch
+  folder; relative paths start there. Gemma 4 E4B with its projector
+  described a test image correctly.
+
 ## [0.5.0] - 2026-10-10
 
 ### Added

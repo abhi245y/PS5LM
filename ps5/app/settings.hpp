@@ -16,6 +16,9 @@ struct Settings {
     uint32_t    ctx_cap   = 65536;  // the planner's longest context
     std::string kv_type   = "auto"; // "auto", "f16", "q8_0" or "q4_0"
     bool        sounds    = true;
+    bool        tools     = true;   // file tools in the browser chat, inside the scratch folder
+    uint32_t    scratch_limit_gib = 2;  // warn when the scratch folder grows past this
+    std::string download_dir = "/data/PS5LM/models";  // where the market saves models
 
     bool operator==(const Settings &) const = default;
 };

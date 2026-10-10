@@ -45,7 +45,9 @@ does not send more than the server holds.
 }
 ```
 
-Then `opencode`, and pick **PS5LM / Model on the PS5** with `/models`.
+Then `opencode`, and pick **PS5LM / Model on the PS5** with `/models`. The
+first run installs the `@ai-sdk/openai-compatible` package, which takes a few
+minutes before anything reaches the console.
 
 ## codex
 
@@ -68,8 +70,15 @@ Then `codex -p ps5`.
 
 ```sh
 ANTHROPIC_BASE_URL=http://192.168.1.19:8081 ANTHROPIC_AUTH_TOKEN=ps5lm \
-ANTHROPIC_MODEL=ps5 ANTHROPIC_SMALL_FAST_MODEL=ps5 claude
+ANTHROPIC_MODEL=ps5 ANTHROPIC_SMALL_FAST_MODEL=ps5 \
+CLAUDE_CODE_MAX_CONTEXT_TOKENS=65536 claude
 ```
+
+Set `CLAUDE_CODE_MAX_CONTEXT_TOKENS` to the context the dashboard shows:
+Claude Code does not know the model and otherwise assumes 200k. It sends some
+system messages in the middle of a conversation, which Qwen's chat template
+refuses ("System message must be at the beginning"); the app's llama-server
+folds them into the first one (`patches/0004`).
 
 ## aider
 
@@ -84,8 +93,16 @@ API key and any model name.
 
 ## Checked on the console
 
-| Tool | Version | Model | Result |
-|---|---|---|---|
-| opencode | 1.18.35 | | not yet run |
-| codex | 0.161.0 | | not yet run |
-| Claude Code | | | not yet run |
+The task, in a folder holding a two-line `hello.py`: "In hello.py, add a
+function add(a, b) that returns a + b. Edit the file; do not create other
+files." Qwen3.8-27B UD-IQ2_XXS, 64k context, q8_0 cache, on 2026-10-10.
+
+| Tool | Version | Result |
+|---|---|---|
+| opencode | 1.18.35 | Edited the file; 208 s |
+| codex | 0.161.0 | Edited the file and ran it to check; 12,960 tokens. Warns that it has no metadata for the model |
+| Claude Code | 2.1.296 | Edited the file; 613 s, most of it the first 18k-token prompt |
+
+Each tool's own prompt (instructions and tool definitions) is 10k to 20k
+tokens, processed at about 30 tokens a second on this model: the first answer
+takes minutes, later turns reuse the cache and are faster.

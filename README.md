@@ -36,6 +36,8 @@ For comparison, the 27B on the CPU as a payload, streamed from disk, made about 
 
 - **Dashboard:** generation speed, GPU and CPU use (one USAGE card, Cross for the full view), SoC power with energy per token (POWER card, Cross for min/avg/max and every temperature sensor), the CPU clock, the memory pool and how the model, KV cache and the rest split it, context in use, storage, temperatures and fan, the loaded model (Cross for every argument it runs with), and load progress.
 - **Pages on L1/R1:** Settings (load a model at launch, which one, the longest context, KV cache type, sounds; kept in `settings.json`) and Logs (`app.log` and `llama.log`, with an errors-only filter).
+- **Get models:** search Hugging Face from the TV, see which files fit before downloading, and download to internal storage or USB (SHA-256 checked).
+- **Chat tools and images:** the browser chat's model can read, write and search files in `/data/PS5LM/scratch` (it cannot reach outside it), and vision models such as Gemma 4 take pictures when their `mmproj` file sits beside them.
 - **Sensors:** a title may not read the temperature and fan sensors, so the app carries [ps5-exporter](https://github.com/Marice/ps5-exporter) (Marice, GPL-3.0) and hands it to elfldr when it is not running. Without elfldr the THERMALS tile stays empty.
 - **Model library:** every `.gguf` in `/data/PS5LM/models` and in `PS5LM/models` on a USB drive, in two sections. Cross loads or unloads. A model on USB loads straight from the drive.
 - **Planner:** picks the longest context and the best KV cache type that fit the memory free, for each model.

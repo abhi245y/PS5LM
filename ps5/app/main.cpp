@@ -38,6 +38,7 @@
 #include "display.hpp"
 #include "ggml-backend.h"
 #include "model_plan.hpp"
+#include "settings.hpp"
 #include "stats.hpp"
 #include "version.hpp"
 
@@ -95,11 +96,34 @@ constexpr const char * kLog         = "/data/PS5LM/app.log";
 constexpr const char * kArgs        = "/data/PS5LM/app-args.txt";
 constexpr const char * kChoice      = "/data/PS5LM/model.txt";
 constexpr const char * kQuit        = "/data/PS5LM/quit";
+constexpr const char * kSettings    = "/data/PS5LM/settings.json";
+constexpr const char * kLlamaLog    = "/data/PS5LM/llama.log";
 constexpr const char * kModels      = "/data/PS5LM/models";
 constexpr const char * kAssets      = "/app0/assets";
 constexpr int          kPort        = 8081;
 const std::vector<std::string> kModelDirs = { kModels, "/mnt/usb0/PS5LM/models", "/mnt/usb1/PS5LM/models",
                                               "/mnt/usb0", "/mnt/usb1" };
+
+// The last lines of a log, up to about 64 KiB of it, oldest first.
+std::vector<std::string> tail_lines(const char * path) {
+    std::vector<std::string> lines;
+    FILE * f = std::fopen(path, "rb");
+    if (!f) {
+        return lines;
+    }
+    std::fseek(f, 0, SEEK_END);
+    const long size = std::ftell(f);
+    const long from = std::max(0L, size - 65536L);
+    std::fseek(f, from, SEEK_SET);
+    std::string text((size_t) (size - from), '\0');
+    text.resize(std::fread(text.data(), 1, text.size(), f));
+    std::fclose(f);
+    size_t start = from > 0 ? text.find('\n') + 1 : 0;  // the first line is cut
+    for (size_t end; start < text.size() && (end = text.find('\n', start)) != std::string::npos; start = end + 1) {
+        lines.emplace_back(text, start, end - start);
+    }
+    return lines;
+}
 
 // A system notification on the TV.
 void notify(const char * text) {
@@ -254,6 +278,9 @@ struct Models {
     std::string            running;          // path of the model llama-server has
     pthread_t              server{};
     bool                   server_started = false;
+    Settings               settings;
+
+    const char * kv_force() const { return settings.kv_type == "auto" ? nullptr : settings.kv_type.c_str(); }
 
     void scan(StatsCollector & stats) {
         rows.clear();
@@ -268,7 +295,7 @@ struct Models {
                 rows.push_back(row);
                 continue;
             }
-            const Plan p = plan_model(m, budget_gib);
+            const Plan p = plan_model(m, budget_gib, settings.ctx_cap, kv_force());
             const Preset * pre = find_preset(m);
             row.arch = m.arch;
             row.plan = p.why;
@@ -293,9 +320,12 @@ struct Models {
     // The arguments for a model: the planner's, or app-args.txt's verbatim.
     std::vector<std::string> args_for(const std::string & path, Live & model_part) {
         const ModelInfo m = read_model_info(path);
-        const Plan p = plan_model(m, budget_gib);
+        const Plan p = plan_model(m, budget_gib, settings.ctx_cap, kv_force());
         const Preset * pre = find_preset(m);
         model_part.model_label = base_name(path);
+        model_part.model_file  = path;
+        model_part.plan        = p.why;
+        model_part.args        = p.args;
         model_part.model_arch  = m.arch;
         model_part.preset      = pre ? pre->label : "";
         model_part.model_gib   = m.file_bytes / 1073741824.0;
@@ -414,11 +444,13 @@ int main(int, char **) {
 
     StatsCollector stats;
     stats.start(kPort);
+    models.settings = load_settings(kSettings);
     models.scan(stats);
 
     // Which model: app-args.txt verbatim, else model.txt, which the library
     // writes just before restarting the app for a switch and which is used
-    // once. A plain launch loads nothing and opens the library instead.
+    // once, else the default model when Settings asks for it at launch. A
+    // plain launch otherwise loads nothing and opens the library.
     Live model_part;
     std::vector<std::string> args = read_lines(kArgs);
     std::string path;
@@ -429,10 +461,15 @@ int main(int, char **) {
         const ModelInfo info = read_model_info(path);
         model_part.model_arch = info.arch;
         model_part.model_gib = info.file_bytes / 1073741824.0;
+        model_part.model_file = path;
+        model_part.args = args;
         std::printf("ps5lm-app: app-args.txt overrides the planner\n");
     } else {
-        const auto chosen = read_lines(kChoice);
+        auto chosen = read_lines(kChoice);
         unlink(kChoice);
+        if (chosen.empty() && models.settings.auto_load && !models.settings.default_model.empty()) {
+            chosen = { models.settings.default_model };  // "none" after an unload keeps it from coming back
+        }
         for (const auto & r : models.rows) {
             if (r.fits && !chosen.empty() && r.file == chosen[0]) {
                 path = r.file;
@@ -463,6 +500,7 @@ int main(int, char **) {
     sounds.load(std::string(kAssets) + "/audio/sfx");
 
     Dashboard dash(fonts);
+    dash.set_settings(models.settings);
     bool      library_shown = false;  // opened once at launch when no model is loaded
     DashboardFrame frame;
     hui::ui::Feedback feedback;
@@ -497,8 +535,40 @@ int main(int, char **) {
             }
         }
         feedback.clear();
-        dash.update(input, dt, feedback);
+        // A button pressed from the PC (scripts/ps5lm-app.sh press r1), for
+        // testing the screens without a controller in hand.
+        hui::InputFrame in = input;
+        if (n % 20 == 10) {
+            const std::string key = take_request_file("/data/PS5LM/press");
+            const struct {
+                const char *   name;
+                hui::Action    action;
+                hui::Direction nav;
+            } keys[] = {
+                { "up", hui::Action::up, hui::Direction::up },
+                { "down", hui::Action::down, hui::Direction::down },
+                { "left", hui::Action::left, hui::Direction::left },
+                { "right", hui::Action::right, hui::Direction::right },
+                { "cross", hui::Action::confirm, hui::Direction::none },
+                { "circle", hui::Action::back, hui::Direction::none },
+                { "triangle", hui::Action::north, hui::Direction::none },
+                { "square", hui::Action::west, hui::Direction::none },
+                { "l1", hui::Action::page_prev, hui::Direction::none },
+                { "r1", hui::Action::page_next, hui::Direction::none },
+            };
+            for (const auto & k : keys) {
+                if (key == k.name) {
+                    in.connected = true;
+                    in.pressed |= hui::action_bit(k.action);
+                    in.nav = k.nav;
+                }
+            }
+        }
+        dash.update(in, dt, feedback);
         for (const auto & cue : feedback.cues) {
+            if (!models.settings.sounds) {
+                break;
+            }
             sounds.play(mixer, cue.set == hui::audio::SoundSet::count ? hui::audio::SoundSet::glass : cue.set, cue);
         }
         if (feedback.rumble_strength > 0.0f) {
@@ -506,7 +576,19 @@ int main(int, char **) {
         }
         pad.tick(dt);
 
+        if (dash.page() == Dashboard::kLogsPage && n % 60 == 0) {
+            dash.set_logs(tail_lines(kLog), tail_lines(kLlamaLog));
+        }
+
         Dashboard::Request req = dash.take_request();
+        if (req.kind == Dashboard::Request::settings) {
+            // The planner's limits change every row's plan; the loaded model
+            // keeps its settings until it is loaded again.
+            models.settings = dash.settings();
+            save_settings(kSettings, models.settings);
+            models.scan(stats);
+            std::printf("ps5lm-app: settings saved\n");
+        }
         // The same requests from the PC (scripts/ps5lm-app.sh load|unload).
         if (n % 60 == 30 && req.kind == Dashboard::Request::none) {
             if (std::string p = take_request_file("/data/PS5LM/load"); !p.empty()) {

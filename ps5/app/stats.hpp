@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ps5lm {
@@ -43,6 +44,9 @@ struct Live {
     uint32_t    ctx       = 0;
     std::string kv_type;
     double      kv_gib    = 0;
+    std::string model_file;              // full path
+    std::string plan;                    // the planner's line
+    std::vector<std::string> args;       // llama-server's arguments
 
     // Speed.
     float gen_tps    = 0;    // over the last generation interval
@@ -55,6 +59,23 @@ struct Live {
     float gpu_busy = 0;      // 0..1
     float cpu_use  = 0;      // 0..1 of the CPUs the app may use
     int   cpus     = 0;
+
+    // The console. Temperatures in degrees C, below -100 when unread; power
+    // in watts, 0 when unread; the CPU clock in GHz.
+    float soc_temp = -1000;
+    float cpu_temp = -1000;
+    float soc_power_w = 0;
+    float cpu_ghz = 0;
+    float fan = -1;              // fan duty 0..1, below 0 when unread
+    bool  sensors_from_exporter = false;  // read from ps5-exporter, not the kernel
+    std::vector<float> temp_history;  // SoC degrees C per second
+    std::vector<float> power_history; // SoC watts per second
+    double energy_wh = 0;             // SoC energy since the app started
+    std::vector<std::pair<std::string, float>> temps;  // every sensor that answered ("cpu", "soc0", ...)
+
+    // Storage, GiB; usb_total 0 when no drive is mounted.
+    double data_free = 0, data_total = 0;
+    double usb_free  = 0, usb_total  = 0;
 
     // Memory, GiB.
     double pool_gib = 0;     // the title's direct memory
@@ -94,6 +115,9 @@ class StatsCollector {
 
 // The console's address on the LAN, as the PC sees it ("192.168.1.19"), or
 // empty. Asks the routing table through an unconnected UDP socket: nothing is sent.
+// Sends a payload file to an ELF loader on this console; false if none listens.
+bool send_payload(const char * path, int port);
+
 std::string local_address();
 
 // A tiny HTTP GET over loopback; returns the body, or empty.

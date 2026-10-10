@@ -8,6 +8,7 @@
 #   scripts/ps5lm-app.sh screenshot [file]   what the TV shows, as a BMP
 #   scripts/ps5lm-app.sh load <model path>   switch the model, as the library does
 #   scripts/ps5lm-app.sh unload              unload the model
+#   scripts/ps5lm-app.sh press <button>      press a button (up, down, cross, l1, r1, ...)
 #
 # The app is never killed: it polls /data/PS5LM/quit and leaves through
 # sceSystemServiceLoadExec("exit"), since killing a title that is rendering
@@ -74,10 +75,11 @@ screenshot() {
 case ${1:-} in
     load) request load "${2:?model path on the console}" ;;
     unload) request unload ;;
+    press) request press "${2:?up|down|left|right|cross|circle|triangle|square|l1|r1}" ;;
     screenshot) screenshot "${2:-}" ;;
     close) close ;;
     deploy) deploy ;;
     launch) launch ;;
     cycle) close; deploy; launch ;;
-    *) echo "usage: $0 close|deploy|launch|cycle|screenshot|load|unload" >&2; exit 2 ;;
+    *) echo "usage: $0 close|deploy|launch|cycle|screenshot|load|unload|press" >&2; exit 2 ;;
 esac

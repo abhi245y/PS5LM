@@ -7,6 +7,44 @@ v0.1.x are the upstream payload releases by cobanov.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-10
+
+### Added
+- POWER card: the SoC's power (CPU, GPU and memory together), its history,
+  energy used this session and joules per generated token; expanded, min,
+  average and max, fan duty and every temperature sensor. The reading is
+  `sceKernelGetSocPowerConsumption`'s low 32 bits in milliwatts (22 W idle,
+  86 W while the 27B generates), through ps5-exporter.
+- USAGE card: GPU and CPU on one chart; expanded, GPU, CPU, memory, storage
+  and the models on disk.
+
+### Changed
+- USAGE replaces the GPU and CPU tiles; THERMALS shows the hottest sensor.
+
+### Fixed
+- Speed and GPU use during a long reply: llama-server's counters move only
+  when a request ends, so the live figures come from the slot's token count.
+
+## [0.3.0] - 2026-10-10
+
+### Added
+- Pages on L1/R1: Dashboard, Settings and Logs, with tabs in the header.
+- Settings page (rail and rows after the kit's Control Room design): load a
+  model at launch and which one, the planner's longest context and KV cache
+  type, interface sounds; saved to `/data/PS5LM/settings.json`.
+- Logs page: `app.log` and `llama.log`, scrollable, with an errors-only filter.
+- Model details on Cross over the Model tile: every llama-server argument, the
+  plan, cache and preset; Triangle opens the library.
+- THERMALS tile (SoC and CPU temperature, fan duty), STORAGE tile (free space
+  on /data and USB), and the CPU clock. A title may not read the sensors
+  (`0x80020002`), so the app bundles Marice's ps5-exporter (GPL-3.0, pinned
+  v0.2.0) and sends it to elfldr when it is not running.
+- `scripts/ps5lm-app.sh press <button>`: drive the screens from a PC.
+
+### Changed
+- One MEMORY tile replaces MEMORY and GPU MEMORY (the GPU and CPU share one
+  pool); CONTEXT takes in the session counts.
+
 ## [0.2.0] - 2026-10-10
 
 First release of the native app (title PPSA99581), from this fork.

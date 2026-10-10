@@ -211,5 +211,19 @@ for font in inter-regular inter-semibold montserrat-medium dejavu-sans-mono; do
 done
 cp "$root/third_party/ps5-homebrew-ui/assets/fonts/"*LICENSE* "$app/assets/fonts/"
 cp -r "$root/third_party/ps5-homebrew-ui/assets/audio/sfx" "$app/assets/audio/"
+# ps5-exporter (Marice, GPL-3.0): a title may not read the temperature, fan or
+# SoC power sensors, a payload may. The app sends it to elfldr when it is not
+# running. Pinned by version and hash, downloaded once into .deps.
+exporter="$root/.deps/ps5-exporter-0.2.0.elf"
+exporter_sha=0d19f7a293eeb30178ba562a3712abfdc50f6b6ebbe180ceaad92dc557948ba8
+if [ ! -f "$exporter" ]; then
+    curl -sSfL -o "$exporter.part" https://github.com/Marice/ps5-exporter/releases/download/v0.2.0/ps5-exporter.elf
+    mv "$exporter.part" "$exporter"
+fi
+echo "$exporter_sha  $exporter" | sha256sum -c --quiet || { echo "build-app: ps5-exporter hash mismatch" >&2; exit 1; }
+mkdir -p "$app/payloads"
+cp "$exporter" "$app/payloads/ps5-exporter.elf"
+printf '%s\n' "ps5-exporter v0.2.0 by Marice, GPL-3.0-or-later: https://github.com/Marice/ps5-exporter" \
+    "Source: https://github.com/Marice/ps5-exporter/tree/v0.2.0" > "$app/payloads/ps5-exporter-NOTICE.txt"
 "$tool" self --inspect --file "$app/eboot.bin" > /dev/null
 echo "build-app: $app ($(stat -c %s "$app/eboot.bin") bytes)"

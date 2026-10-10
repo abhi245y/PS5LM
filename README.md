@@ -12,7 +12,7 @@
 
 ## The native app
 
-A payload gets about 6 GiB of memory and no GPU; a native app (a title) gets the console's 12 GiB of direct memory and the GPU. The app runs llama-server with ggml's Vulkan backend on Mihawk-99's RADV port, with one 11.44 GiB device heap, and serves the chat at `http://<console IP>:8081` (llama.cpp's web UI and the OpenAI API).
+A payload gets about 6 GiB of memory and no GPU; a native app (a title) gets the console's 12 GiB of direct memory and the GPU. The app runs llama-server with ggml's Vulkan backend on Mihawk-99's RADV port, with one 11.44 GiB device heap, and serves the chat at `http://<console IP>:8081` (llama.cpp's web UI and the OpenAI API). Coding tools such as opencode, codex and Claude Code can use it as their model: see [docs/CLI.md](docs/CLI.md).
 
 | Model (on the PS5 GPU) | Context | Generation |
 |---|---|---|

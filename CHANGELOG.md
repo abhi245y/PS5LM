@@ -7,6 +7,17 @@ v0.1.x are the upstream payload releases by cobanov.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-10
+
+### Added
+- `docs/CLI.md`: opencode, codex and Claude Code against the model on the
+  console, each checked on a small edit with Qwen3.8-27B UD-IQ2_XXS.
+
+### Fixed
+- Claude Code got HTTP 500 on every request: it sends system messages in the
+  middle of a conversation and Qwen's template refuses them.
+  `patches/0004` folds them into the first system message.
+
 ## [0.4.0] - 2026-10-10
 
 ### Added

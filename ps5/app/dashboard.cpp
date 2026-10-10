@@ -201,7 +201,7 @@ constexpr SettingCategory kCategories[] = {
       3 },
     { "App", "The app itself.",
       { { Setting::sounds, "Sounds", "Interface sounds on the TV." },
-        { Setting::download_dir, "Download to", "Where Get models saves: internal storage, or PS5LM/models on the USB drive." } },
+        { Setting::download_dir, "Download to", "Where Get models saves: internal storage, or PS5LM/models on an M.2 or USB drive." } },
       2 },
 };
 constexpr int kCategoryCount = 4;
@@ -382,7 +382,8 @@ void Dashboard::update_dashboard(const hui::InputFrame & input, ui::Feedback & f
 namespace {
 
 // The value of a setting as the row shows it, and one step of it.
-std::string setting_text(const Settings & s, Setting id, const std::vector<ModelRow> & models) {
+std::string setting_text(const Settings & s, Setting id, const std::vector<ModelRow> & models,
+                         const std::vector<Drive> & drives) {
     char t[32];
     switch (id) {
         case Setting::default_model: {
@@ -404,7 +405,14 @@ std::string setting_text(const Settings & s, Setting id, const std::vector<Model
         case Setting::scratch_limit:
             std::snprintf(t, sizeof(t), "%u GiB", s.scratch_limit_gib);
             return t;
-        case Setting::download_dir: return s.download_dir.rfind("/mnt/", 0) == 0 ? "USB drive" : "Internal storage";
+        case Setting::download_dir: {
+            for (const auto & d : drives) {
+                if (d.models == s.download_dir) {
+                    return d.name;
+                }
+            }
+            return s.download_dir.rfind("/mnt/ext", 0) == 0 ? "M.2 drive (not found)" : "USB drive (not found)";
+        }
         default: return "";
     }
 }
@@ -418,7 +426,7 @@ bool toggle_value(const Settings & s, Setting id) {
 constexpr uint32_t kScratchSteps[] = { 1, 2, 5, 10, 20 };
 
 // Moves a stepper one place; false at either end.
-bool step_setting(Settings & s, Setting id, int dir, const std::vector<ModelRow> & models) {
+bool step_setting(Settings & s, Setting id, int dir, const std::vector<ModelRow> & models, const std::vector<Drive> & drives) {
     switch (id) {
         case Setting::default_model: {
             // "None", then each model that fits, in the library's order.
@@ -485,11 +493,18 @@ bool step_setting(Settings & s, Setting id, int dir, const std::vector<ModelRow>
         case Setting::tools: s.tools = !s.tools; return true;
         case Setting::clear_scratch: return false;
         case Setting::download_dir: {
-            const bool usb = s.download_dir.rfind("/mnt/", 0) == 0;
-            if ((dir > 0) == usb) {
+            // Each mounted drive in turn; a missing one counts as before the first.
+            int at = -1;
+            for (int i = 0; i < (int) drives.size(); ++i) {
+                if (drives[(size_t) i].models == s.download_dir) {
+                    at = i;
+                }
+            }
+            const int next = at + dir;
+            if (next < 0 || next >= (int) drives.size()) {
                 return false;
             }
-            s.download_dir = usb ? "/data/PS5LM/models" : "/mnt/usb0/PS5LM/models";
+            s.download_dir = drives[(size_t) next].models;
             return true;
         }
     }
@@ -556,7 +571,7 @@ void Dashboard::update_settings(const hui::InputFrame & input, ui::Feedback & fe
                 dir = 0;
             }
         }
-        if (dir != 0 && step_setting(settings_, id, dir, live_.models)) {
+        if (dir != 0 && step_setting(settings_, id, dir, live_.models, live_.drives)) {
             request_ = { Request::settings, "" };
             feedback.play(is_toggle(id) ? hui::audio::Cue::toggle : hui::audio::Cue::slider, 1.0f + 0.05f * (float) dir);
         } else if (dir != 0 && !input.nav_repeat) {
@@ -589,7 +604,45 @@ int log_level(const std::string & line) {
 
 }  // namespace
 
+// After the space check: ask about a loaded model first, or start.
+void Dashboard::start_download(ui::Feedback & feedback) {
+    if (!live_.model_label.empty() && live_.free_gib < 2.0) {
+        market_confirm_ = true;  // a model holds the memory: ask first
+        feedback.play(hui::audio::Cue::modal_open);
+    } else {
+        request_ = { Request::market_download, market_dir_, market_.open, market_file_ };
+        feedback.play(hui::audio::Cue::complete);
+    }
+}
+
 void Dashboard::update_market(const hui::InputFrame & input, ui::Feedback & feedback) {
+    // The download does not fit where it would go.
+    if (market_space_) {
+        if (input.is_pressed(Action::confirm) && !market_dir_.empty()) {
+            market_space_ = false;
+            start_download(feedback);
+        } else if (input.is_pressed(Action::back)) {
+            market_space_ = false;
+            feedback.play(hui::audio::Cue::back);
+        }
+        return;
+    }
+    // The question before a download while a model holds the memory.
+    if (market_confirm_) {
+        if (input.is_pressed(Action::north)) {
+            request_ = { Request::market_download_unload, market_dir_, market_.open, market_file_ };
+            market_confirm_ = false;
+            feedback.play(hui::audio::Cue::complete);
+        } else if (input.is_pressed(Action::confirm)) {
+            request_ = { Request::market_download, market_dir_, market_.open, market_file_ };
+            market_confirm_ = false;
+            feedback.play(hui::audio::Cue::complete);
+        } else if (input.is_pressed(Action::back)) {
+            market_confirm_ = false;
+            feedback.play(hui::audio::Cue::back);
+        }
+        return;
+    }
     const int step = input.is_pressed(Action::jump_next) ? 1 : input.is_pressed(Action::jump_prev) ? -1 : 0;
     if (step != 0) {
         const int next = market_chip_ + step;
@@ -629,11 +682,25 @@ void Dashboard::update_market(const hui::InputFrame & input, ui::Feedback & feed
             feedback.play(hui::audio::Cue::open);
         } else if (market_files_ && open && cursor < files) {
             const MarketFile & f = open->files[(size_t) cursor];
+            const double need = f.bytes / 1073741824.0 + 1.0;  // and 1 GiB spare, as Market::download wants
+            const Drive * to = nullptr;
+            const Drive * other = nullptr;  // the roomiest other drive it fits on
+            for (const auto & d : live_.drives) {
+                if (d.models == settings_.download_dir) {
+                    to = &d;
+                } else if (d.free >= need && (!other || d.free > other->free)) {
+                    other = &d;
+                }
+            }
+            market_dir_.clear();
             if (f.fits == 0 || market_.download_progress >= 0) {
                 feedback.play(hui::audio::Cue::error);  // too big, or one download already runs
+            } else if (!to || (to->total > 0 && to->free < need)) {  // unknown space (no exporter) does not block
+                market_space_ = true;
+                market_dir_ = other ? other->models : "";
+                feedback.play(hui::audio::Cue::modal_open);
             } else {
-                request_ = { Request::market_download, "", market_.open, cursor };
-                feedback.play(hui::audio::Cue::complete);
+                start_download(feedback);
             }
         }
     }
@@ -932,22 +999,23 @@ void Dashboard::draw_content(gfx::DrawList & list, int tile, const Rect & r, flo
             break;
         }
         case kStorage: {
-            const struct {
-                const char * name;
-                double       free, total;
-            } drives[2] = { { "INTERNAL", L.data_free, L.data_total }, { "USB", L.usb_free, L.usb_total } };
-            for (int k = 0; k < 2; ++k) {
-                const float y = r.y + 92 + k * 52.0f;
-                caps(list, f, drives[k].name, r.x + kPad, y, 15, kInk.with_alpha(kMuted));
-                if (drives[k].total <= 0) {
-                    ui::text(list, f.regular, k == 1 ? "No drive" : kDash, r.x + r.w - kPad, y, 20, kInk.with_alpha(kFaint),
-                             gfx::Align::right);
+            // Internal storage and the first two drives; no drive shows as such.
+            const size_t n = std::min<size_t>(L.drives.size(), 3);
+            for (size_t k = 0; k < n; ++k) {
+                const Drive & d = L.drives[k];
+                const float y = n > 2 ? r.y + 80 + (float) k * 40.0f : r.y + 92 + (float) k * 52.0f;  // three fit tighter
+                caps(list, f, d.name.substr(0, d.name.find(' ')), r.x + kPad, y, 15, kInk.with_alpha(kMuted));
+                if (d.total <= 0) {
+                    ui::text(list, f.regular, kDash, r.x + r.w - kPad, y, 20, kInk.with_alpha(kFaint), gfx::Align::right);
                     continue;
                 }
-                std::snprintf(text, sizeof(text), "%.0f GiB free", drives[k].free);
+                std::snprintf(text, sizeof(text), "%.0f GiB free", d.free);
                 ui::text(list, f.mono, text, r.x + r.w - kPad, y, 20, kInk, gfx::Align::right);
-                bar(list, { r.x + kPad, y + 14, r.w - 2 * kPad, 8 },
-                    (float) ((drives[k].total - drives[k].free) / drives[k].total) * up, kRose);
+                bar(list, { r.x + kPad, y + 14, r.w - 2 * kPad, 8 }, (float) ((d.total - d.free) / d.total) * up, kRose);
+            }
+            if (n == 1) {
+                caps(list, f, "USB / M.2", r.x + kPad, r.y + 144, 15, kInk.with_alpha(kMuted));
+                ui::text(list, f.regular, "No drive", r.x + r.w - kPad, r.y + 144, 20, kInk.with_alpha(kFaint), gfx::Align::right);
             }
             break;
         }
@@ -1094,12 +1162,16 @@ void Dashboard::draw_library(gfx::DrawList & list, std::uint32_t glass) const {
     for (int i = 0; i < rows; ++i) {
         const ModelRow & m = live_.models[(size_t) i];
         const int   s = slot(i);
-        if (i == 0 || m.on_usb != live_.models[(size_t) i - 1].on_usb) {
+        if (i == 0 || m.drive != live_.models[(size_t) i - 1].drive) {
             const int h = s - 1;
             if (h >= first && h < first + 8) {
                 const float hy = top + (float) (h - first) * kRowH;
-                caps(list, f, m.on_usb ? "USB DRIVE" : "INTERNAL STORAGE", panel.x + 60, hy + 50, 16,
-                     m.on_usb ? kAmber : kCyan);
+                std::string head = m.drive.empty() ? "OTHER" : m.drive;
+                for (char & c : head) {
+                    c = (char) std::toupper((unsigned char) c);
+                }
+                const bool internal = m.drive.rfind("Internal", 0) == 0;
+                caps(list, f, head, panel.x + 60, hy + 50, 16, internal ? kCyan : kAmber);
                 list.rounded_rect({ panel.x + 60, hy + 62, panel.w - 120, 1 }, 0, kInk.with_alpha(0.12f));
             }
         }
@@ -1135,12 +1207,12 @@ void Dashboard::open_library() {
     cursor_y_.snap((float) slot(library_cursor_));
 }
 
-// Rows come sorted by path, so internal (/data) ones precede USB (/mnt) ones;
-// each group gets a header line above it.
+// Rows come sorted by path, so they group by drive (/data, then /mnt/ext0,
+// /mnt/usb0...); each group gets a header line above it.
 int Dashboard::slot(int row) const {
     int s = row + 1;
-    if (row > 0 && live_.models[(size_t) row].on_usb && !live_.models[0].on_usb) {
-        ++s;
+    for (int i = 1; i <= row; ++i) {
+        s += live_.models[(size_t) i].drive != live_.models[(size_t) i - 1].drive;
     }
     return s;
 }
@@ -1308,20 +1380,22 @@ void Dashboard::draw_usage_details(gfx::DrawList & list, const Rect & panel) con
     bar(list, { x0, panel.y + 534, colw, 12 }, L.pool_gib > 0 ? (float) (used / L.pool_gib) : 0.0f, kAmber);
 
     caps(list, f, "STORAGE", x1, panel.y + 514, 16, kRose);
-    const struct {
-        const char * name;
-        double       free, total;
-    } drives[2] = { { "Internal", L.data_free, L.data_total }, { "USB", L.usb_free, L.usb_total } };
-    for (int k = 0; k < 2; ++k) {
-        const float y = panel.y + 570 + k * 70.0f;
-        ui::text(list, f.regular, drives[k].name, x1, y, 20, kInk.with_alpha(0.85f));
-        if (drives[k].total <= 0) {
-            ui::text(list, f.regular, "No drive", x1 + colw, y, 20, kInk.with_alpha(kFaint), gfx::Align::right);
+    const size_t n = std::min<size_t>(L.drives.size(), 3);
+    for (size_t k = 0; k < n; ++k) {
+        const Drive & d = L.drives[k];
+        const float y = panel.y + 570 + (float) k * 56.0f;
+        ui::text(list, f.regular, d.name, x1, y, 20, kInk.with_alpha(0.85f));
+        if (d.total <= 0) {
+            ui::text(list, f.regular, kDash, x1 + colw, y, 20, kInk.with_alpha(kFaint), gfx::Align::right);
             continue;
         }
-        std::snprintf(text, sizeof(text), "%.0f of %.0f GiB free", drives[k].free, drives[k].total);
+        std::snprintf(text, sizeof(text), "%.0f of %.0f GiB free", d.free, d.total);
         ui::text(list, f.mono, text, x1 + colw, y, 20, kInk, gfx::Align::right);
-        bar(list, { x1, y + 16, colw, 10 }, (float) ((drives[k].total - drives[k].free) / drives[k].total), kRose);
+        bar(list, { x1, y + 16, colw, 10 }, (float) ((d.total - d.free) / d.total), kRose);
+    }
+    if (n == 1) {
+        ui::text(list, f.regular, "USB or M.2", x1, panel.y + 626, 20, kInk.with_alpha(0.85f));
+        ui::text(list, f.regular, "No drive", x1 + colw, panel.y + 626, 20, kInk.with_alpha(kFaint), gfx::Align::right);
     }
     caps(list, f, "MODELS", x0, panel.y + 610, 16, kInk.with_alpha(kMuted));
     double on_disk = 0;
@@ -1468,13 +1542,13 @@ void Dashboard::draw_settings(gfx::DrawList & list) const {
             if (focused) {
                 list.rounded_rect({ cx - w * 0.5f + 34, row.cy() - 24, w - 68, 48 }, 14, kBlack.with_alpha(0.25f));
             }
-            const std::string v = setting_text(settings_, sr.id, live_.models);
+            const std::string v = setting_text(settings_, sr.id, live_.models, live_.drives);
             ui::text(list, f.semibold, f.semibold.font->fit(v, 26, w - 100), cx, row.cy() + 9, 26,
                      focused ? kInk : kInk.with_alpha(0.84f), gfx::Align::center);
             Settings probe = settings_;
-            const bool left_ok = step_setting(probe, sr.id, -1, live_.models);
+            const bool left_ok = step_setting(probe, sr.id, -1, live_.models, live_.drives);
             probe = settings_;
-            const bool right_ok = step_setting(probe, sr.id, 1, live_.models);
+            const bool right_ok = step_setting(probe, sr.id, 1, live_.models, live_.drives);
             const Color tint = focused ? kCyan : kInk;
             const float rest = focused ? 1.0f : 0.5f;
             ui::text(list, f.mono, "\xE2\x97\x80", cx - w * 0.5f + 12, row.cy() + 10, 30,
@@ -1515,7 +1589,7 @@ void Dashboard::draw_market(gfx::DrawList & list) const {
 
     const float lx = p.x + kPad, lw = 620, rx = lx + lw + 40, rw = p.x + p.w - kPad - rx, top = p.y + 96;
     list.rounded_rect({ rx - 20, top, 1, kMarketRows * kMarketRowH }, 0, kInk.with_alpha(0.1f));
-    char text[160];
+    char text[256];
     // Repositories.
     const int repos = (int) M.repos.size();
     const int rfirst = std::max(0, market_repo_ - (kMarketRows - 1));
@@ -1567,6 +1641,64 @@ void Dashboard::draw_market(gfx::DrawList & list) const {
             const Color  tc  = mf.fits == 1 ? kLime : mf.fits == 0 ? kRose : kInk.with_alpha(kMuted);
             caps(list, f, tag, rx + rw - 8, y + 36, 14, tc, gfx::Align::right);
         }
+    }
+
+    // A question over the lists: a title, a headline, a paragraph, buttons.
+    const auto dialog = [&](Color c, const char * title, const std::string & head, const char * body, const ui::Hint * hints,
+                            int n) {
+        const Rect d{ p.cx() - 430, p.cy() - 150, 860, 300 };
+        list.rounded_rect(p, kRadius, kBlack.with_alpha(0.55f));  // a scrim over the lists
+        list.shadow({ d.x, d.y + 18, d.w, d.h }, 28, 40, kBlack.with_alpha(0.6f));
+        draw_panel(list, d, 28, 1.0f, c);
+        caps(list, f, title, d.x + 44, d.y + 56, 18, c);
+        ui::text(list, f.semibold, f.semibold.font->fit(head, 24, d.w - 88), d.x + 44, d.y + 104, 24, kInk);
+        ui::paragraph(list, f.regular, body, d.x + 44, d.y + 144, 21, d.w - 88, 30, kInk.with_alpha(kMuted), 3);
+        ui::HintLayout layout;
+        layout.size = 34.0f;
+        layout.text_size = 22.0f;
+        layout.cy = d.y + d.h - 40;
+        layout.item_gap = 32.0f;
+        ui::draw_hints(list, fonts_, ui::GlyphStyle::dark(), hints, n, d.x + d.w - 44, true, layout);
+    };
+    // The download does not fit where it would go.
+    if (market_space_ && open && market_file_ < (int) open->files.size()) {
+        const MarketFile & mf = open->files[(size_t) market_file_];
+        const Drive * to = nullptr;
+        const Drive * other = nullptr;
+        for (const auto & d : live_.drives) {
+            to = d.models == settings_.download_dir ? &d : to;
+            other = d.models == market_dir_ ? &d : other;
+        }
+        char head[160];
+        std::snprintf(head, sizeof(head), "%s needs %.1f GiB.", mf.name.c_str(), mf.bytes / 1073741824.0);
+        char where[96];
+        if (to) {
+            std::snprintf(where, sizeof(where), "%s has %.1f GiB free", to->name.c_str(), to->free);
+        } else {
+            std::snprintf(where, sizeof(where), "The drive in Settings is not connected");
+        }
+        if (other) {
+            std::snprintf(text, sizeof(text), "%s, and 1 GiB stays spare. %s has %.0f GiB free; this one download can go "
+                          "there. Download to in Settings keeps the default.", where, other->name.c_str(), other->free);
+        } else {
+            std::snprintf(text, sizeof(text), "%s, and 1 GiB stays spare. No other drive has room: free some space, or "
+                          "connect a USB drive or an M.2 drive.", where);
+        }
+        const std::string save = other ? "Save to " + other->name : "";
+        const ui::Hint hints[] = { { ui::Button::cross, save.c_str() }, { ui::Button::circle, "Cancel" } };
+        dialog(kRose, "NOT ENOUGH SPACE", head, text, other ? hints : hints + 1, other ? 2 : 1);
+    }
+    // The question before downloading next to a loaded model.
+    if (market_confirm_) {
+        std::snprintf(text, sizeof(text), "%s holds most of the memory.", live_.model_label.c_str());
+        const std::string head = text;
+        std::snprintf(text, sizeof(text),
+                      "%.1f GiB is free. The download may be slower while it stays loaded. Unloading restarts the app "
+                      "without it, and the download starts on its own.",
+                      live_.free_gib);
+        const ui::Hint hints[] = { { ui::Button::triangle, "Unload and download" }, { ui::Button::cross, "Download anyway" },
+                                   { ui::Button::circle, "Cancel" } };
+        dialog(kAmber, "A MODEL IS LOADED", head, text, hints, 3);
     }
 
     // The download, under both panes.
@@ -1662,6 +1794,8 @@ void Dashboard::draw_hints(DashboardFrame & frame) const {
             const ui::Hint plain[] = { { ui::Button::dpad, "Change" }, { ui::Button::circle, "Back" } };
             ui::draw_hints(frame.scene, fonts_, style, toggle ? hints : plain, toggle ? 3 : 2, kGridX + kGridW, true);
         }
+    } else if (page_ == kMarketPage && (market_confirm_ || market_space_)) {
+        // The dialog carries its own buttons.
     } else if (page_ == kMarketPage) {
         const ui::Hint browse[] = { { ui::Button::l2, "Search" }, { ui::Button::dpad, "Choose" }, { ui::Button::cross, "Open" } };
         const ui::Hint files[] = { { ui::Button::dpad, "Choose" }, { ui::Button::cross, "Download" }, { ui::Button::circle, "Back" } };

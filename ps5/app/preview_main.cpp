@@ -78,10 +78,7 @@ ps5lm::Live sample(float seconds, bool generating) {
     L.temps = { { "cpu", 54 }, { "soc0", 61 }, { "soc1", 60 }, { "soc2", 59 }, { "soc3", 62 }, { "soc4", 61 },
                 { "soc5", 60 }, { "soc6", 58 } };
     L.cpu_ghz     = 3.5f;
-    L.data_free   = 412;
-    L.data_total  = 825;
-    L.usb_free    = 455;
-    L.usb_total   = 477;
+    L.drives = { { "Internal storage", "/data/PS5LM/models", 8, 825 }, { "M.2 drive", "/mnt/ext0/PS5LM/models", 1520, 1863 }, { "USB drive", "/mnt/usb0/PS5LM/models", 455, 477 } };
     L.pool_gib    = 11.44;
     L.free_gib    = 0.31;
     L.heap_gib    = 0.76;
@@ -113,6 +110,7 @@ ps5lm::Live sample(float seconds, bool generating) {
     for (int i = 0; i < 5; ++i) {
         ps5lm::ModelRow m;
         m.file = std::string("/data/PS5LM/models/") + files[i] + ".gguf";
+        m.drive = "Internal storage";
         m.label = files[i];
         m.plan = plans[i];
         m.size_gib = sizes[i];
@@ -127,7 +125,8 @@ ps5lm::Live sample(float seconds, bool generating) {
     usb.plan = "64k context, q8_0 cache: 8.6 of 11.0 GiB";
     usb.preset = "Ornith 1.5";
     usb.size_gib = 5.38;
-    usb.fits = usb.on_usb = true;
+    usb.fits = true;
+    usb.drive = "USB drive";
     L.models.push_back(usb);
     usb.file = "/mnt/usb0/PS5LM/models/gemma-4-12b-it-Q3_K_M.gguf";
     usb.label = "gemma-4-12b-it-Q3_K_M";
@@ -324,5 +323,11 @@ int main(int argc, char ** argv) {
     step(30, press(hui::Action::confirm), false);
     step(20, nav(hui::Direction::down), false);
     shot("12-market-files");
+    mv.download_progress = -1;  // nothing downloading, so Cross asks first
+    dash.set_market(mv);
+    step(30, press(hui::Action::confirm), false);
+    shot("13-market-space");
+    step(30, press(hui::Action::confirm), false);
+    shot("14-market-confirm");
     return ok ? 0 : 1;
 }

@@ -59,6 +59,40 @@ void space(const char * path, double * free, double * total) {
     *total = (double) v.f_blocks * v.f_frsize / kGiB;
 }
 
+}  // namespace
+
+// A title's statvfs is a stub (the same 64 GiB for every path) and statfs is
+// not exported to titles, so the space comes from ps5-exporter, a payload.
+// /data is /user/data. Without the exporter the space is unknown (total 0).
+std::vector<Drive> drives_from_metrics(const std::string & text) {
+    std::vector<Drive> out = { { "Internal storage", "/data/PS5LM/models" } };
+    const std::string key = "ps5_filesystem_size_bytes{mountpoint=\"";
+    for (size_t at = text.find(key); at != std::string::npos; at = text.find(key, at + 1)) {
+        const size_t from = at + key.size();
+        const std::string mount = text.substr(from, text.find('"', from) - from);
+        const size_t brace = text.find('{', at);
+        const std::string labels = text.substr(brace, text.find('}', from) + 1 - brace);  // {mountpoint=...,fstype=...}
+        const double total = sample(text, "ps5_filesystem_size_bytes" + labels, 0) / kGiB;
+        const double free = sample(text, "ps5_filesystem_avail_bytes" + labels, 0) / kGiB;
+        if (mount == "/user") {
+            out[0].free = free;
+            out[0].total = total;
+        } else if ((mount.rfind("/mnt/ext", 0) == 0 || mount.rfind("/mnt/usb", 0) == 0) && total >= 1.0) {
+            // ponytail: drives under 1 GiB are left out (a USB stick's small partition)
+            out.push_back({ drive_name(mount), mount + "/PS5LM/models", free, total });
+        }
+    }
+    return out;
+}
+
+std::vector<Drive> mounted_drives() { return drives_from_metrics(http_get(9100, "/metrics", 2)); }
+
+std::string drive_name(const std::string & path) {
+    return path.rfind("/mnt/ext", 0) == 0 ? "M.2 drive" : path.rfind("/mnt/usb", 0) == 0 ? "USB drive" : "Internal storage";
+}
+
+namespace {
+
 double now_s() {
     return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
@@ -302,8 +336,9 @@ void StatsCollector::run() {
         float fan = -1;
         bool  from_exporter = false;
         std::vector<std::pair<std::string, float>> temps;
+        std::string p;  // ps5-exporter's metrics
         if (soc_t < -100) {
-            std::string p = http_get(9100, "/metrics");
+            p = http_get(9100, "/metrics");
             // Not running: hand the bundled copy to elfldr, at start and then
             // once a minute (elfldr may come later).
             if (p.empty() && (long) (wall - start) % 60 == 1) {
@@ -329,13 +364,7 @@ void StatsCollector::run() {
                 }
             }
         }
-        double data_free = 0, data_total = 0, usb_free = 0, usb_total = 0;
-        space("/data", &data_free, &data_total);
-        // An empty /mnt/usb0 is a directory of the root filesystem, not a drive.
-        struct statvfs usb = {}, mnt = {};
-        if (statvfs("/mnt/usb0", &usb) == 0 && statvfs("/mnt", &mnt) == 0 && usb.f_fsid != mnt.f_fsid) {
-            space("/mnt/usb0", &usb_free, &usb_total);
-        }
+        std::vector<Drive> drives = drives_from_metrics(p);
 
         std::lock_guard<std::mutex> lock(mutex_);
         const double dt = wall - last_wall;
@@ -353,10 +382,7 @@ void StatsCollector::run() {
         if (soc_t > -100) {
             push(live_.temp_history, soc_t);
         }
-        live_.data_free = data_free;
-        live_.data_total = data_total;
-        live_.usb_free = usb_free;
-        live_.usb_total = usb_total;
+        live_.drives = std::move(drives);
         live_.uptime_s = wall - start;
         live_.pool_gib = pool;
         live_.free_gib = free;

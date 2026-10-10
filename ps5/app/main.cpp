@@ -103,14 +103,15 @@ constexpr const char * kChoice      = "/data/PS5LM/model.txt";
 constexpr const char * kQuit        = "/data/PS5LM/quit";
 constexpr const char * kSettings    = "/data/PS5LM/settings.json";
 constexpr const char * kScratch     = "/data/PS5LM/scratch";
+constexpr const char * kPendingDownload = "/data/PS5LM/download.txt";  // a download to start after a restart
 // The file tools only: a title cannot start processes (no shell command).
 constexpr const char * kTools       = "read_file,write_file,edit_file,file_glob_search,grep_search,get_info";
 constexpr const char * kLlamaLog    = "/data/PS5LM/llama.log";
 constexpr const char * kModels      = "/data/PS5LM/models";
 constexpr const char * kAssets      = "/app0/assets";
 constexpr int          kPort        = 8081;
-const std::vector<std::string> kModelDirs = { kModels, "/mnt/usb0/PS5LM/models", "/mnt/usb1/PS5LM/models",
-                                              "/mnt/usb0", "/mnt/usb1" };
+const std::vector<std::string> kModelDirs = { kModels, "/mnt/ext0/PS5LM/models", "/mnt/usb0/PS5LM/models",
+                                              "/mnt/usb1/PS5LM/models", "/mnt/usb0", "/mnt/usb1" };
 
 // The last lines of a log, up to about 64 KiB of it, oldest first.
 std::vector<std::string> tail_lines(const char * path) {
@@ -322,7 +323,15 @@ std::vector<std::string> read_lines(const char * path) {
     return out;
 }
 
-bool is_usb(const std::string & path) { return path.rfind("/mnt/usb", 0) == 0; }
+// Free GiB on the drive whose models folder is `dir`, or -1 when unknown.
+double free_gib(const std::string & dir) {
+    for (const auto & d : mounted_drives()) {
+        if (d.models == dir && d.total > 0) {
+            return d.free;
+        }
+    }
+    return -1;
+}
 
 std::string base_name(const std::string & path) {
     std::string n = path.substr(path.find_last_of('/') + 1);
@@ -377,7 +386,7 @@ struct Models {
             ModelRow row;
             row.file = path;
             row.label = base_name(path);
-            row.on_usb = is_usb(path);
+            row.drive = drive_name(path);
             if (!m.ok) {
                 row.plan = m.error;
                 rows.push_back(row);
@@ -603,6 +612,15 @@ int main(int, char **) {
     dash.set_settings(models.settings);
     bool      library_shown = false;  // opened once at launch when no model is loaded
     bool      scratch_warned = false;
+    // A download asked for with "unload and download" before the restart.
+    if (const auto pending = read_lines(kPendingDownload); pending.size() >= 5) {
+        unlink(kPendingDownload);
+        MarketJob job{ pending[0], pending[1], pending[2] == "-" ? "" : pending[2], pending[4], std::strtoull(pending[3].c_str(), nullptr, 10) };
+        market.download(job, free_gib(job.dir));
+        dash.show_page(Dashboard::kMarketPage);
+        library_shown = true;  // stay on Get models, not the library
+        std::printf("ps5lm-app: downloading %s/%s after the restart\n", job.repo.c_str(), job.file.c_str());
+    }
     DashboardFrame frame;
     hui::ui::Feedback feedback;
     hui::PadSample samples[64];
@@ -689,6 +707,7 @@ int main(int, char **) {
                 char text[128];
                 std::snprintf(text, sizeof(text), "PS5LM: the chat's scratch folder holds %.1f GiB; clear it in Settings", gib);
                 notify(text);
+                std::printf("ps5lm-app: %s\n", text + 7);
             }
             scratch_warned = over;
         }
@@ -722,9 +741,26 @@ int main(int, char **) {
             case Dashboard::Request::market_open: market.open_repo(req.repo); break;
             case Dashboard::Request::market_plan: market.plan_file(req.repo, req.file); break;
             case Dashboard::Request::market_download: {
-                std::error_code ec;
-                std::filesystem::create_directories(models.settings.download_dir, ec);
-                market.download(req.repo, req.file, models.settings.download_dir);
+                MarketJob job;
+                if (market.job(req.repo, req.file, req.path.empty() ? models.settings.download_dir : req.path, &job)) {
+                    market.download(job, free_gib(job.dir));
+                }
+                break;
+            }
+            case Dashboard::Request::market_download_unload: {
+                // Unload by restarting (as the library does), leaving the
+                // download for the new process to start.
+                MarketJob job;
+                if (market.job(req.repo, req.file, req.path.empty() ? models.settings.download_dir : req.path, &job)) {
+                    std::ofstream(kPendingDownload) << job.repo << "\n" << job.file << "\n" << (job.sha256.empty() ? "-" : job.sha256) << "\n"
+                                                    << job.bytes << "\n" << job.dir << "\n";
+                    std::ofstream(kChoice) << "none\n";
+                    notify("PS5LM: unloading the model, then downloading");
+                    std::printf("ps5lm-app: restarting to download %s/%s without a model\n", job.repo.c_str(), job.file.c_str());
+                    std::fflush(nullptr);
+                    models.stop();
+                    sceSystemServiceLoadExec("/app0/eboot.bin", nullptr);
+                }
                 break;
             }
             default: break;

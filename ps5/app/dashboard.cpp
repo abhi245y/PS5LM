@@ -801,8 +801,12 @@ void Dashboard::draw_content(gfx::DrawList & list, int tile, const Rect & r, flo
             const bool known = L.soc_temp > -100;
             const float tw = number(list, f, known, "%.0f", L.soc_temp, r.x + kPad, r.y + 118, 60, kInk);
             ui::text(list, f.regular, "\xC2\xB0" "C, the SoC", r.x + kPad + tw + 10, r.y + 118, 22, kInk.with_alpha(kMuted));
-            if (L.cpu_temp > -100) {
+            if (L.cpu_temp > -100 && L.fan >= 0) {
+                std::snprintf(text, sizeof(text), "CPU %.0f \xC2\xB0" "C  \xC2\xB7  fan %.0f%%", L.cpu_temp, L.fan * 100.0f);
+            } else if (L.cpu_temp > -100) {
                 std::snprintf(text, sizeof(text), "CPU %.0f \xC2\xB0" "C", L.cpu_temp);
+            } else if (!L.sensors_from_exporter) {
+                std::snprintf(text, sizeof(text), "Load ps5-exporter to read them");
             } else {
                 std::snprintf(text, sizeof(text), "No sensor answered");
             }

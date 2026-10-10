@@ -123,6 +123,39 @@ double metric(const std::string & text, const char * name) {
     return at == std::string::npos ? 0.0 : std::strtod(text.c_str() + at + key.size(), nullptr);
 }
 
+// One sample from Prometheus text by its full name and labels
+// ("ps5_temperature_celsius{sensor=\"cpu\"}"), or `missing`.
+double sample(const std::string & text, const std::string & key, double missing) {
+    const size_t at = text.find("\n" + key + " ");
+    return at == std::string::npos ? missing : std::strtod(text.c_str() + at + key.size() + 2, nullptr);
+}
+
+// Sends a payload to an ELF loader on this console (elfldr, port 9021).
+bool send_payload(const char * path, int port) {
+    FILE * f = std::fopen(path, "rb");
+    if (!f) {
+        return false;
+    }
+    const int fd = socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in to = {};
+#ifdef __FreeBSD__
+    to.sin_len = sizeof(to);
+#endif
+    to.sin_family = AF_INET;
+    to.sin_port   = htons((uint16_t) port);
+    to.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    bool ok = fd >= 0 && connect(fd, (sockaddr *) &to, sizeof(to)) == 0;
+    char buf[65536];
+    for (size_t n; ok && (n = std::fread(buf, 1, sizeof(buf), f)) > 0;) {
+        ok = send(fd, buf, n, 0) == (ssize_t) n;
+    }
+    std::fclose(f);
+    if (fd >= 0) {
+        close(fd);
+    }
+    return ok;
+}
+
 std::string local_address() {
     const int fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0) {
@@ -243,7 +276,39 @@ void StatsCollector::run() {
         }
         const long hz = sceKernelGetCpuFrequency();
         ghz = hz > 0 ? (float) (hz / 1e9) : 0.0f;
+        static bool logged = false;  // ponytail: once, to see what a title is allowed to read
+        if (!logged) {
+            logged = true;
+            int t0 = -1000, t1 = -1000;
+            const int r0 = sceKernelGetSocSensorTemperature(0, &t0), r1 = sceKernelGetCpuTemperature(&t1);
+            std::printf("ps5lm-app: sensors: soc rc 0x%x t %d, cpu rc 0x%x t %d, power raw %llu, cpu hz %ld\n", r0, t0,
+                        r1, t1, (unsigned long long) raw[0], hz);
+        }
 #endif
+        // A title may not read the sensors (0x80020002); a payload may.
+        // Marice/ps5-exporter, when loaded, serves them on port 9100.
+        float fan = -1;
+        bool  from_exporter = false;
+        if (soc_t < -100) {
+            std::string p = http_get(9100, "/metrics");
+            // Not running: hand the bundled copy to elfldr, at start and then
+            // once a minute (elfldr may come later).
+            if (p.empty() && (long) (wall - start) % 60 == 1) {
+                const bool sent = send_payload("/app0/payloads/ps5-exporter.elf", 9021);
+                std::printf("ps5lm-app: ps5-exporter not running; %s\n",
+                            sent ? "sent the bundled copy to elfldr" : "no elfldr on 9021 to load it");
+            }
+            if (!p.empty()) {
+                from_exporter = true;
+                soc_t = (float) sample(p, "ps5_temperature_celsius{sensor=\"soc0\"}", -1000);
+                cpu_t = (float) sample(p, "ps5_temperature_celsius{sensor=\"cpu\"}", -1000);
+                watts = (float) sample(p, "ps5_soc_power_watts", 0);
+                fan   = (float) sample(p, "ps5_fan_duty_ratio", -1);
+                if (ghz <= 0) {
+                    ghz = (float) (sample(p, "ps5_cpu_frequency_hertz", 0) / 1e9);
+                }
+            }
+        }
         double data_free = 0, data_total = 0, usb_free = 0, usb_total = 0;
         space("/data", &data_free, &data_total);
         // An empty /mnt/usb0 is a directory of the root filesystem, not a drive.
@@ -258,6 +323,8 @@ void StatsCollector::run() {
         live_.cpu_temp = cpu_t;
         live_.soc_power_w = watts;
         live_.cpu_ghz = ghz;
+        live_.fan = fan;
+        live_.sensors_from_exporter = from_exporter;
         if (soc_t > -100) {
             push(live_.temp_history, soc_t);
         }

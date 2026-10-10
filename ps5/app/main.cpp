@@ -535,7 +535,36 @@ int main(int, char **) {
             }
         }
         feedback.clear();
-        dash.update(input, dt, feedback);
+        // A button pressed from the PC (scripts/ps5lm-app.sh press r1), for
+        // testing the screens without a controller in hand.
+        hui::InputFrame in = input;
+        if (n % 20 == 10) {
+            const std::string key = take_request_file("/data/PS5LM/press");
+            const struct {
+                const char *   name;
+                hui::Action    action;
+                hui::Direction nav;
+            } keys[] = {
+                { "up", hui::Action::up, hui::Direction::up },
+                { "down", hui::Action::down, hui::Direction::down },
+                { "left", hui::Action::left, hui::Direction::left },
+                { "right", hui::Action::right, hui::Direction::right },
+                { "cross", hui::Action::confirm, hui::Direction::none },
+                { "circle", hui::Action::back, hui::Direction::none },
+                { "triangle", hui::Action::north, hui::Direction::none },
+                { "square", hui::Action::west, hui::Direction::none },
+                { "l1", hui::Action::page_prev, hui::Direction::none },
+                { "r1", hui::Action::page_next, hui::Direction::none },
+            };
+            for (const auto & k : keys) {
+                if (key == k.name) {
+                    in.connected = true;
+                    in.pressed |= hui::action_bit(k.action);
+                    in.nav = k.nav;
+                }
+            }
+        }
+        dash.update(in, dt, feedback);
         for (const auto & cue : feedback.cues) {
             if (!models.settings.sounds) {
                 break;

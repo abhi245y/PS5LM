@@ -7,6 +7,8 @@ v0.1.x are the upstream payload releases by cobanov.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-10
+
 ### Added
 - Pages on L1/R1: Dashboard, Settings and Logs, with tabs in the header.
 - Settings page (rail and rows after the kit's Control Room design): load a
@@ -15,8 +17,11 @@ v0.1.x are the upstream payload releases by cobanov.
 - Logs page: `app.log` and `llama.log`, scrollable, with an errors-only filter.
 - Model details on Cross over the Model tile: every llama-server argument, the
   plan, cache and preset; Triangle opens the library.
-- THERMALS tile (SoC and CPU temperature, SoC power), STORAGE tile (free space
-  on /data and USB), and the CPU clock.
+- THERMALS tile (SoC and CPU temperature, fan duty), STORAGE tile (free space
+  on /data and USB), and the CPU clock. A title may not read the sensors
+  (`0x80020002`), so the app bundles Marice's ps5-exporter (GPL-3.0, pinned
+  v0.2.0) and sends it to elfldr when it is not running.
+- `scripts/ps5lm-app.sh press <button>`: drive the screens from a PC.
 
 ### Changed
 - One MEMORY tile replaces MEMORY and GPU MEMORY (the GPU and CPU share one

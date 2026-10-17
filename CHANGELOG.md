@@ -2,7 +2,7 @@
 
 Versions follow [semver](https://semver.org). The app's version is set in
 `ps5/app/version.hpp` and shown on the dashboard; each release is tagged
-`v<version>` and ships `ps5lm-app-v<version>.zip` (see `scripts/release-app.sh`).
+`v<version>` and ships `ps5lm-plus-v<version>.zip` (see `scripts/release-app.sh`).
 v0.1.x are the upstream payload releases by cobanov.
 
 ## [Unreleased]

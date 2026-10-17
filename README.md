@@ -81,7 +81,7 @@ ps5-exporter comes inside the app; you do not load it yourself.
 
 ## Install
 
-1. Download `ps5lm-app-vX.Y.Z.zip` from the [releases](https://github.com/abhi245y/PS5LM-Plus/releases) and check it against its `.sha256`.
+1. Download `ps5lm-plus-vX.Y.Z.zip` from the [releases](https://github.com/abhi245y/PS5LM-Plus/releases) and check it against its `.sha256`.
 2. Unzip it and copy the `PPSA99581` folder to `/data/homebrew/PPSA99581` over FTP. ShadowMountPlus adds **PS5LM Plus** to the home screen.
 3. Start PS5LM. Pick a model in **Get models**, or copy a `.gguf` to `/data/PS5LM/models`, to `/data/homebrew/PPSA99581/models`, or to `PS5LM/models` on a USB drive (exFAT) or the M.2 drive.
 4. Choose the model in the library. Once the dashboard says Ready, open `http://<console IP>:8081` on a phone or computer.
@@ -142,7 +142,7 @@ git clone --recursive https://github.com/abhi245y/PS5LM-Plus
 cd PS5LM
 (cd .deps/src/PS5_Vulkan && tools/setup-native-dependencies.sh && tools/build-radv.sh release && make app)
 scripts/build-app.sh             # build/app-ps5/title/PPSA99581
-scripts/release-app.sh           # build/release/ps5lm-app-vX.Y.Z.zip and its .sha256
+scripts/release-app.sh           # build/release/ps5lm-plus-vX.Y.Z.zip and its .sha256
 ```
 
 From the PC, with the app on the console:

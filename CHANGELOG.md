@@ -7,6 +7,15 @@ v0.1.x are the upstream payload releases by cobanov.
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-10-17 (pre-release)
+
+### Changed
+- The app reserves 16 GiB of its own space on the console's SSD (`downloadDataSize`), where
+  settings and downloads go when nothing opens `/data` to it. Consoles where `/data` is open
+  keep using `/data/PS5LM` as before.
+- The content ID is `UP9000-PPSA99581_00-PS5LMPLUS0000001`. Install it over 0.8.3 by copying
+  the new folder over the old one, as usual.
+
 ### Fixed
 - Storage on consoles whose HEN does not open `/data` to the title on its own (OnionHEN;
   cobanov/PS5LM#16). The app now asks when it starts, in every process (the restart for a model
